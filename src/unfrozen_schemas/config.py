@@ -102,7 +102,7 @@ def sha256_file(path: Path) -> str:
 
 
 def find_repository_root(start: Path) -> Path:
-    """Locate the Git root that also contains the immutable Revision 4 specification."""
+    """Locate the Git root that also contains the authoritative Revision 6 specification."""
 
     candidate = start.resolve()
     if candidate.is_file():

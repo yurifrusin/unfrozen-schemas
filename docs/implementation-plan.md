@@ -1,6 +1,6 @@
 # Implementation plan: Milestones 0-4
 
-This plan translates Revision 4 into dependency-ordered, reviewable work packages. Only the active
+This plan translates Revision 6 into dependency-ordered, reviewable work packages. Only the active
 milestone may be implemented. Milestones 5-10 are roadmap items, not executable work packages.
 
 Phase I is a permanent scientific result and mandatory gate, not a disposable prototype. Its hard
@@ -11,15 +11,42 @@ sensor condition does not cause Phase I to fail. Literal L1/L2 learning without 
 transfer is a scientifically meaningful compartmentalisation result and a primary motivation for
 Phase II. Phase II and Phase III cannot begin merely because their architectures are attractive.
 
+The governance set also includes `PROJECT_HISTORY.md`, `RESEARCH_LOG.md`,
+`docs/release-and-archive-process.md`, and `docs/document-ingest-workflow.md`. `origin/main` is the
+canonical public history; work on a feature branch is not a completed milestone.
+
+## Cross-cutting Milestone 0-10 closeout gate
+
+The final acceptance section for every Milestone 0-10 incorporates this sequence by reference. A
+milestone is not complete, and the next milestone is not authorised, until all steps finish:
+
+1. complete the scoped work on its dedicated branch and inspect the complete diff;
+2. push the branch and open or update a pull request into `main`;
+3. require declared CI checks and human review;
+4. merge the reviewed result into `origin/main`;
+5. synchronise local `main` using a fast-forward-only pull and verify a clean matching commit;
+6. create the immutable annotated engineering tag `milestone-N-complete`;
+7. push the tag explicitly;
+8. publish a GitHub Release containing the exact commit, specification hash, CI result, scope,
+   limitations, artifact hashes, advancement decision, and next authorised work;
+9. ensure `PROJECT_HISTORY.md` and `RESEARCH_LOG.md` are current; and
+10. begin the next milestone only from the tagged canonical commit.
+
+Engineering milestone tags remain distinct from scientific checkpoint tags such as
+`benchmark-v1-core-frozen`, `phase1-preregistered-v1`, and `phase1-gate-v1`. Published tags are
+immutable; corrections receive a new correction tag and release.
+
 ## Milestone 0: repository foundation
 
 ### M0.1 — Governance and scientific guardrails
 
 - **Objective:** Encode the enduring scientific, artifact, gate, and engineering rules before code
   is introduced.
-- **Dependencies:** Revision 4 specification read in full; clean repository preflight.
+- **Dependencies:** Revision 6 specification read in full; clean repository preflight.
 - **Files:** `AGENTS.md`, `docs/scientific-design.md`, `docs/implementation-plan.md`,
-  `docs/budget-accounting.md`, `docs/phase-gate-protocol.md`, `docs/open-questions.md`.
+  `docs/budget-accounting.md`, `docs/phase-gate-protocol.md`, `docs/open-questions.md`,
+  `PROJECT_HISTORY.md`, `RESEARCH_LOG.md`, `docs/release-and-archive-process.md`, and
+  `docs/document-ingest-workflow.md`.
 - **Implementation steps:** Summarise the three phases; define the transfer ladder, accounting, gate
   semantics, invalidation, workflow, and only genuinely unresolved decisions.
 - **Acceptance tests:** Manual cross-check against all specification sections; verify L3/L4 never
@@ -29,7 +56,7 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 - **Artifacts:** Reviewed Markdown governance set.
 - **Failure modes and risks:** Accidentally weakening a requirement, treating a null L3/L4 result as
   failure, or turning settled requirements into open questions.
-- **Completion criteria:** All six documents are internally consistent and faithful to Revision 4.
+- **Completion criteria:** The governance set is internally consistent and faithful to Revision 6.
 - **Stop conditions:** Any conflict within the specification or any proposed narrowing of the
   controlled design requires owner review.
 
@@ -87,9 +114,11 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 - **Implementation steps:** Implement deterministic run-ID construction with injectable inputs;
   seed handling; Git commit/dirty capture; platform, Python, and installed-package capture; canonical
   JSON; SHA-256 artifact records; required budget fields; placeholder gate metadata; manifest start,
-  success, and failure states.
+  success, and failure states; and an explicit bootstrap-failure record for failures before a valid
+  initial `RUNNING` manifest exists.
 - **Acceptance tests:** Round-trip every model; test clean and dirty temporary Git repositories;
-  test deterministic seeds and IDs; ensure failures retain a reason and partial accounting.
+  test deterministic seeds and IDs; ensure bootstrap and started-run failures retain the original
+  reason, the strongest valid record, partial artifacts, and partial accounting.
 - **Scientific invariants:** Dirty state is never suppressed; external/self-generated language,
   sensor, environment, and compute fields remain separate; placeholder gate data cannot authorise
   Phase II.
@@ -106,13 +135,16 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 - **Dependencies:** M0.3-M0.4.
 - **Files:** `src/unfrozen_schemas/cli.py`, `src/unfrozen_schemas/smoke.py`, structured logging module,
   `tests/fixtures/tiny_random_model.json`, integration tests.
-- **Implementation steps:** Load the local fixture; make one deterministic tiny forward pass; create
+- **Implementation steps:** Capture provenance before run creation; load the local fixture; make one
+  deterministic tiny forward pass; create
   an isolated run directory; write resolved config, toy output, budget ledger, placeholder gate
-  metadata, JSONL logs, and final provenance manifest; print a concise summary; preserve a complete
-  failed run on exceptions.
+  metadata, JSONL logs, and final provenance manifest; protect every operation after directory
+  creation; print a concise summary; preserve a complete failure manifest for started runs or an
+  explicit validated bootstrap record when a complete manifest is not valid.
 - **Acceptance tests:** CLI exits zero offline without CUDA, secrets, downloads, or network; expected
-  files exist and hashes match; repeated seeded model computation agrees; injected fixture failure
-  exits non-zero and records its cause.
+  files exist and hashes match; repeated seeded model computation agrees; one-shot initial writes,
+  logging setup, initial-manifest construction, fixture failures, and secondary recording failures
+  exit non-zero without masking the original cause or claiming an invalid artifact.
 - **Scientific invariants:** The fixture is engineering-only and implements no SchemaWorld dynamics,
   treatment generation, LoRA, active agent, projector, Phase II experiment, or colony component.
 - **Artifacts:** Complete ignored `runs/<run-id>/` toy run.
@@ -139,8 +171,34 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 - **Failure modes and risks:** Tests pass only with local cache, CI writes tracked artifacts, or
   static typing excludes tests.
 - **Completion criteria:** All five required checks pass from the locked environment and the complete
-  diff is reviewed against Revision 4.
+  diff is reviewed against Revision 6.
 - **Stop conditions:** Any acceptance failure blocks the milestone commit.
+
+### M0.7 — Canonical GitHub closeout and release infrastructure
+
+- **Objective:** Establish canonical milestone closeout, history, release templates, and controlled
+  document ingestion.
+- **Dependencies:** M0.1-M0.6 and completion of pre-merge smoke-run hardening.
+- **Files:** `PROJECT_HISTORY.md`, `RESEARCH_LOG.md`, `docs/release-and-archive-process.md`,
+  `docs/document-ingest-workflow.md`, `docs/release-notes/milestone-template.md`,
+  `docs/release-notes/scientific-checkpoint-template.md`, `docs/release-notes/milestone-0.md`,
+  `AGENTS.md`, and `README.md`.
+- **Implementation steps:** Document canonical `origin/main`; exact branch/PR/merge/tag/release flow;
+  immutable tag rules; scientific checkpoint namespace; release content; owner Downloads ingest
+  procedure; history/log responsibilities; and recommended main protection.
+- **Acceptance tests:** Repository-wide references use `CODEX_SPEC.md`; the exact staging path
+  appears only in operator documentation/rules; no code, config, test, manifest, or CI depends on
+  it; templates contain commit/specification/CI/artifact/decision fields; branch completion cannot
+  be confused with milestone completion.
+- **Scientific invariants:** A software release cannot masquerade as a scientific freeze or gate;
+  publishable runs require a clean merged tagged commit; tags are immutable.
+- **Artifacts:** Complete governance set and a draft `docs/release-notes/milestone-0.md`.
+- **Failure modes and risks:** Tagging an unmerged commit, moving a tag, omitting failed work,
+  copying unrelated Downloads content, or beginning Milestone 1 before release closeout.
+- **Completion criteria:** After human approval and merge, local `main` is synchronised,
+  `milestone-0-complete` is pushed, a GitHub Release exists, and history/log records are current.
+- **Stop conditions:** Failed CI, unresolved review, dirty tag target, missing source-document hash,
+  or inconsistent remote state.
 
 ## Milestone 1: SchemaWorld Core
 
@@ -232,10 +290,12 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 - **Scientific invariants:** No benchmark treatment or adaptation work begins.
 - **Artifacts:** Reviewed deterministic core fixture set and milestone report.
 - **Failure modes and risks:** Cross-platform hash drift or unreported generated artifacts.
-- **Completion criteria:** Milestone 1 deliverables and tests pass and receive review.
+- **Completion criteria:** Milestone 1 deliverables and tests pass, then the cross-cutting canonical
+  closeout gate completes through merge, local sync, immutable annotated tag push, GitHub Release,
+  and current project/research records.
 - **Stop conditions:** Any nondeterminism or unmatched counterfactual blocks acceptance.
 
-## Milestone 2: frozen core benchmark
+## Milestone 2: benchmark construction, hardware qualification, and model-stack freeze
 
 ### M2.1 — Benchmark schema and lifecycle
 
@@ -306,20 +366,57 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 - **Completion criteria:** Scoring reproduces pinned examples and fails closed on prohibited access.
 - **Stop conditions:** A model API cannot expose defensible likelihoods without changing the endpoint.
 
-### M2.5 — Freeze `v1_core`
+### M2.5 — RTX 5070 hardware qualification and model selection
+
+- **Objective:** Prospectively select and approve a real local Phase I model stack that fits one
+  RTX 5070 12 GB card without using final benchmark outcomes.
+- **Dependencies:** Accepted M2.1-M2.4; quarantined `selection_probe_v1`; engineering adaptation
+  fixture; owner access to the RTX workstation.
+- **Files:** Hardware and candidate configs; CUDA/VRAM profiling; candidate registry;
+  sensor-embedding injection tests; qualification report; model-selection approval.
+- **Implementation steps:** Qualify sequence lengths 256/512/1024 with optional 2048, microbatch 1,
+  fixed effective batch by accumulation, LoRA rank 8/16 with optional 32, BF16 LoRA and separately
+  declared NF4 QLoRA, gradient checkpointing, standard PyTorch SDPA, and no CPU offload. Evaluate an
+  approximately 0.8-2.2B text-only base-model primary envelope with frozen tokenizer and lexical
+  embedding matrix, separate sensor/action embeddings, logits and hidden-state access, and no
+  mandatory remote code.
+- **Acceptance tests:** Verify exact model/tokenizer revisions and licences; offline reload;
+  gradients only in approved sensor/LoRA parameters; adapter save/reload; likelihood and hidden-state
+  access; no fatal probe floor/ceiling; measured reserve of `max(15% VRAM, 1.5 GiB)`; practical
+  projected matrix runtime; and complete clean-commit provenance.
+- **Scientific invariants:** No final benchmark item or target domain is used; BF16 and QLoRA remain
+  distinct; no OOM-triggered silent configuration change; native Windows and WSL2/Linux remain
+  distinct fingerprints until tested; the lexical embedding matrix remains frozen and the
+  sensor/action path remains separate.
+- **Artifacts:** Hardware qualification, candidate comparison, and signed model-selection approval
+  identifying exactly one `QUALIFIED_PRIMARY` stack plus declared fallback/replication posture.
+- **Failure modes and risks:** Candidate selection from final outcomes, hidden offload or precision
+  drift, inadequate VRAM reserve, unreviewed remote code, or reopened model choice after approval.
+- **Completion criteria:** One exact primary stack is approved; candidates are classified as
+  `QUALIFIED_PRIMARY`, `QUALIFIED_REPLICATION`, `CONDITIONAL`, or `REJECTED`; and every qualified
+  envelope is hash- and commit-bound.
+- **Stop conditions:** No candidate satisfies licence, access, frozen-embedding, VRAM, determinism,
+  runtime, or provenance requirements.
+
+### M2.6 — Freeze `v1_core`
 
 - **Objective:** Freeze the complete Phase I benchmark before any treatment run.
-- **Dependencies:** M2.1-M2.4 and owner approval of open benchmark decisions.
+- **Dependencies:** M2.1-M2.4, approved M2.5 model-selection artifacts, and owner approval of open
+  benchmark decisions.
 - **Files:** `benchmarks/frozen/v1_core/`, benchmark config/card, immutable manifest and hashes.
 - **Implementation steps:** Final validation; human sign-off; produce content manifest; mark release
   and private partitions; commit and tag the benchmark version.
 - **Acceptance tests:** Rebuild/hash equality, mutation rejection, coverage matrix, leakage audit, and
   secret-answer isolation.
-- **Scientific invariants:** No post-treatment item editing; changes create a new benchmark version.
+- **Scientific invariants:** No post-treatment item editing; changes create a new benchmark version;
+  no final item may have been used to choose hardware, model, adapter, precision, quantisation, or
+  memory settings.
 - **Artifacts:** Frozen `v1_core` and benchmark card.
 - **Failure modes and risks:** Premature freezing, accidental answer publication, or incomplete
   validation provenance.
-- **Completion criteria:** Exact Git commit and hashes identify the approved frozen benchmark.
+- **Completion criteria:** Exact Git commit and hashes identify the approved frozen benchmark, its
+  distinct scientific-checkpoint release is published, and Milestone 2 then completes the
+  cross-cutting engineering closeout gate before Milestone 3 begins.
 - **Stop conditions:** Owner/human-validator approval or licensing is missing.
 
 ## Milestone 3: Phase I adaptation pipeline
@@ -328,7 +425,7 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 
 - **Objective:** Generate matched `text_oracle`, `sensor_causal`, `sensor_passive`, and
   `sensor_shuffled` data from frozen core curricula.
-- **Dependencies:** Accepted M2.
+- **Dependencies:** Accepted M2.6 frozen benchmark and approved M2.5 model-selection artifacts.
 - **Files:** data generators/transforms, condition configs, manifests, tests.
 - **Implementation steps:** Serialize literal oracle text; apply opaque codec; mask action/proprioceptive
   inputs; shuffle within frozen strata; preserve token marginals, episodes, and budgets.
@@ -342,24 +439,29 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 - **Completion criteria:** Every condition transformation is deterministic, audited, and reviewed.
 - **Stop conditions:** A matching failure or leakage finding blocks training.
 
-### M3.2 — Model loader, sensor embeddings, and LoRA contracts
+### M3.2 — Approved model loader, separate sensor embeddings, and LoRA contracts
 
-- **Objective:** Load the configuration-selected open model stack with a frozen base and precisely
-  declared trainable components.
-- **Dependencies:** M3.1 and owner resolution of the Phase I model stack.
+- **Objective:** Implement the already approved M2.5 model stack with a frozen base, frozen lexical
+  embedding matrix, separate sensor/action embedding path, and precisely declared trainable
+  components; do not reopen model selection.
+- **Dependencies:** M3.1 and the exact approved M2.5 primary-stack fingerprint.
 - **Files:** model/tokenizer/LoRA/sensor loader modules, model config, CPU toy tests, optional GPU tests.
-- **Implementation steps:** Verify repository/revision/licence/tokenizer hashes; add new opaque sensor
-  embeddings; configure LoRA targets; count trainable parameters; support CPU tiny fixtures and
-  consumer-GPU modes.
-- **Acceptance tests:** Offline cached load, hash mismatch refusal, frozen base, trainable-count
-  accuracy, save/reload adapters, and no real download in ordinary CI.
+- **Implementation steps:** Verify repository/revision/licence/tokenizer/qualification hashes; inject
+  dedicated opaque sensor/action embeddings without training the lexical matrix; configure only the
+  approved LoRA targets, precision, quantisation, sequence envelope, operating environment, and
+  offload posture; count trainable parameters; support CPU tiny fixtures and the qualified GPU mode.
+- **Acceptance tests:** Offline cached load, hash mismatch refusal, frozen base and lexical
+  embeddings, gradients only in approved sensor/LoRA parameters, trainable-count accuracy,
+  save/reload adapters, likelihood and hidden-state access, and no real download in ordinary CI.
 - **Scientific invariants:** Model identity is configuration-driven; all conditions use the same
   declared base.
 - **Artifacts:** Model-stack fingerprint and tiny adapter fixture.
 - **Failure modes and risks:** Silent revision drift, unintended trainable base weights, or licence
   incompatibility.
 - **Completion criteria:** Exact stack provenance and trainable paths are reproducible.
-- **Stop conditions:** Missing licence approval, unavailable weights, or material stack change.
+- **Stop conditions:** Missing licence or M2.5 approval, unavailable weights, or any change to model,
+  tokenizer, precision, quantisation, sequence envelope, LoRA placement, sensor pathway, operating
+  environment, or offload posture without a new qualification artifact.
 
 ### M3.3 — Training, replay, checkpoint, and resume engine
 
@@ -402,7 +504,7 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 
 - **Objective:** Evaluate frozen benchmark items closed-book and preserve ordinary language retention
   and complete item-level outputs.
-- **Dependencies:** M2.5 and M3.3-M3.4.
+- **Dependencies:** Frozen M2.6 benchmark artifacts and M3.3-M3.4.
 - **Files:** evaluators, transfer aggregation, retention modules, metrics manifests, tests.
 - **Implementation steps:** Score pre/post schema margins and option reversals; disable sensors,
   ledgers, and retrieval; aggregate without gate decisions; record checkpoint and benchmark hashes.
@@ -425,7 +527,8 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 - **Scientific invariants:** Tiny fixtures are engineering evidence only and cannot produce `PASS`.
 - **Artifacts:** Pipeline acceptance report and pinned regression hashes.
 - **Failure modes and risks:** Fixture success is mistaken for scientific calibration.
-- **Completion criteria:** Review confirms the pipeline is ready for a preregistered matrix.
+- **Completion criteria:** Review confirms the pipeline is ready for a preregistered matrix, then
+  the cross-cutting canonical closeout gate completes before Milestone 4 begins.
 - **Stop conditions:** Any integrity audit failure blocks Milestone 4.
 
 ## Milestone 4: Phase I calibration matrix and mandatory gate
@@ -434,11 +537,13 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 
 - **Objective:** Preregister hard thresholds, seeds, exclusions, budgets, model fingerprint, benchmark,
   curricula, and decision logic before treatment runs.
-- **Dependencies:** Accepted M3 and owner decisions for gate thresholds/seeds.
+- **Dependencies:** Accepted M3, the exact qualified M2.5 model-stack fingerprint, frozen M2.6
+  benchmark artifacts, and owner decisions for gate thresholds/seeds.
 - **Files:** `configs/gate/phase1.yaml`, confirmatory experiment config, frozen matrix manifest,
   preregistration record.
-- **Implementation steps:** Resolve all configurations; hash inputs; validate two schemas, P1-C0 to
-  P1-C4, and at least three seeds; obtain owner review; commit before execution.
+- **Implementation steps:** Resolve all configurations; freeze the qualified model-stack and
+  hardware-environment fingerprints; hash inputs; validate two schemas, P1-C0 to P1-C4, and at
+  least three seeds; obtain owner review; commit before execution.
 - **Acceptance tests:** Completeness, immutable hashes, no post-treatment metrics available, and
   explicit proof that L3/L4 fields are absent from decision inputs.
 - **Scientific invariants:** Thresholds cannot be calibrated from post-treatment comparisons.
@@ -518,7 +623,8 @@ Phase II. Phase II and Phase III cannot begin merely because their architectures
 - **Failure modes and risks:** Treating Phase I as disposable, overstating a result, or bypassing the
   compatibility gate.
 - **Completion criteria:** Human review accepts the report/archive and the technical gate matches the
-  scientific decision.
+  scientific decision; the scientific checkpoint uses its distinct immutable tag/release, and the
+  cross-cutting Milestone 4 engineering closeout gate completes before any authorised advancement.
 - **Stop conditions:** Any unresolved integrity concern, approval mismatch, or missing permanent
   artifact blocks advancement.
 
@@ -537,29 +643,44 @@ No executable work packages are authorised for these milestones at this stage:
 - **Milestone 9:** secondary mechanistic integration analysis.
 - **Milestone 10:** separately reviewed Phase III neural-colony experiment.
 
+Phase II defaults to a locally hardware-qualified 1.5-3B stack. Any different or multimodally
+pretrained stack requires its own qualification and the mandated Phase I compatibility calibration.
+Each roadmap milestone remains subject to the cross-cutting Milestone 0-10 closeout gate: PR, CI,
+human review, merge, local fast-forward sync, immutable annotated engineering tag and tag push,
+GitHub Release, and current project/research records.
+
 ## Git and GitHub workflow
 
-- Use `codex/<milestone>-<short-purpose>` branches unless an existing Codex task branch must be
-  retained. Never combine milestones on one branch.
-- Make small, milestone-scoped commits whose messages describe one reviewed work package. The final
-  milestone commit may aggregate only when every included change is part of that milestone.
-- Require human review before merge. Never auto-merge a scientific milestone or begin the next
-  milestone merely because CI passed.
-- GitHub Actions must install from the lock, run Ruff lint and formatting, strict mypy, pytest, and
-  the offline smoke path on CPU. Optional GPU checks remain separately marked and non-blocking unless
-  explicitly promoted.
+- Use dedicated `codex/<milestone>-<purpose>` or `docs/<revision>-<purpose>` branches. Never combine
+  milestones on one branch and never declare a milestone complete on a local or remote feature
+  branch.
+- Treat `origin/main` as canonical. Push every task branch, review it through a pull request into
+  `main`, and require declared CI plus human review before merge.
+- After a GitHub merge, synchronise local `main` with `git pull --ff-only origin main`; after a local
+  merge, push `main`. Verify the canonical commit and clean tree before tagging.
+- Create and explicitly push immutable annotated engineering tags `milestone-N-complete`. Never
+  move, delete, or reuse a published tag; corrections use a new correction tag and release.
+- Keep engineering milestone tags distinct from scientific tags such as
+  `benchmark-v1-core-frozen`, `phase1-preregistered-v1`, and `phase1-gate-v1`.
+- Publish a GitHub Release for every milestone and major scientific checkpoint. Release notes record
+  the exact commit, `CODEX_SPEC.md` hash, CI result, scope, limitations, artifact hashes,
+  advancement decision, and next authorised work.
+- Update `PROJECT_HISTORY.md` for factual chronology and `RESEARCH_LOG.md` for intellectual or
+  methodological changes. Neither overrides a frozen scientific artifact.
+- Start publishable scientific runs only from a clean merged tagged commit. Branch-head runs remain
+  exploratory unless separately frozen and approved.
+- GitHub Actions install from the lock and run Ruff lint/format, strict mypy, pytest, and offline CPU
+  smoke. Optional GPU qualification remains separately marked and cannot silently become a CI
+  dependency.
 - Every run manifest records the exact Git commit and dirty state. Clean and dirty results are never
   pooled without an explicit frozen policy; dirty provenance is retained rather than rewritten.
-- Generated ordinary runs, reports, checkpoints, model weights, downloaded models, raw/licensed
-  datasets, and temporary logs remain outside Git. Durable scientific artifacts live in approved
-  artifact storage with hashes and archive indexes.
-- Do not commit third-party datasets or licensed materials without documented redistribution rights.
-  Record dataset source, version, licence, hashes, and local acquisition procedure.
-- Never commit secrets, access tokens, model credentials, private keys, full model weights,
-  checkpoints, or machine-specific paths.
+- Generated runs, reports, checkpoints, model weights, downloaded models, raw/licensed datasets,
+  and temporary logs remain outside Git. Durable scientific artifacts live in approved storage with
+  hashes and archive indexes.
+- Do not commit third-party data without redistribution rights, or any secret, token, credential,
+  private key, full model weight, checkpoint, or machine-specific runtime dependency.
 - Retain small deterministic fixtures, regression hashes, frozen configurations, benchmark
-  manifests/cards, and declared scientific metadata when they are reviewable and legally
-  distributable.
-- Every scientific table, figure, metric, and gate report must resolve to its run/group manifest,
-  artifact hashes, frozen inputs, and exact Git commit. A changed commit or hashed input produces a
-  new result identity rather than silently updating the old result.
+  manifests/cards, release notes, approved manifests, and legally distributable scientific metadata.
+- Every scientific table, figure, metric, and gate report resolves to its run/group manifest,
+  artifact hashes, frozen inputs, and exact canonical commit. Changed content produces a new result
+  identity rather than silently updating the old result.

@@ -5,7 +5,9 @@
 
 **Repository name:** `unfrozen-schemas`
 
-**Status:** revision 4 implementation specification. This revision formalises Phase I as a mandatory, auditable scientific gate; separates hard advancement criteria from non-gating abstract and metaphorical diagnostics; requires a compatibility calibration when the Phase II model stack changes; and retains the richer language-scaffolded Phase II and neural-colony Phase III programme.
+**Canonical GitHub repository:** `https://github.com/yurifrusin/unfrozen-schemas`
+
+**Status:** revision 6 implementation specification. This revision preserves the Revision 5 RTX 5070 hardware and model-selection envelope, and adds canonical GitHub history, milestone closeout, immutable tagging, GitHub Release, project-history, research-log, and controlled local-document-ingest requirements. A milestone is not complete merely because code has been written or a branch has been pushed: it must be reviewed, merged into `origin/main`, tagged, released, and recorded before the next milestone begins.
 
 ---
 
@@ -258,30 +260,92 @@ Complexity follows a curriculum and must remain exactly auditable. Do not begin 
 
 ### Model posture
 
-Phase I primary model:
+#### Hardware-constrained Phase I primary envelope
 
-- open-weight 1–2B base causal LM;
-- frozen base plus LoRA and sensor embeddings;
-- clean likelihood-based evaluation.
+The primary Phase I model must be:
 
-Phase II primary model:
+- an open-weight **text-only base causal language model** in the approximate 0.8–2.2B parameter range;
+- available through a pinned Hugging Face revision without mandatory unreviewed remote code;
+- able to expose token likelihoods, hidden states, ordinary attention/MLP modules, and deterministic save/reload behaviour;
+- licensed for reproducible research and redistribution of adapters, with Apache-2.0 strongly preferred;
+- small enough to train LoRA adapters on the measured 12 GB hardware envelope while retaining explicit VRAM headroom for activations, sensor inputs, evaluation, and failure recovery.
 
-- open-weight 1.5–4B instruction-capable or chat-capable transformer, configuration-driven;
-- a language workspace capable of structured prediction, hypothesis, action, and consolidation outputs;
-- trainable sensor projector, concept bridge, world-model head, and selected LoRA paths;
-- a base-model or second-family replication after the pilot.
+For the primary Phase I matrix, prefer **BF16 LoRA on an unquantised frozen base** when the hardware qualification proves it fits. This avoids making 4-bit quantisation part of the principal scientific intervention. QLoRA with NF4 and double quantisation is a declared fallback or replication stack, not an automatic default. Quantised and unquantised runs may never be pooled as one model stack.
 
-No model identity is hard-coded. Record repository, revision, licence, tokenizer hash, quantisation, and exact trainable parameter count.
+Freeze the lexical tokenizer and lexical embedding matrix. Opaque sensor and action symbols use a small separate embedding table or projector injected through `inputs_embeds` or an equivalent reviewed interface. Do not make a complete high-vocabulary lexical embedding matrix trainable merely to add sensor symbols.
+
+#### Initial candidate registry — dated 2026-08-24, not yet selected
+
+The first hardware-selection pass should evaluate:
+
+1. `Qwen/Qwen3-1.7B-Base` — current front-runner for the primary Phase I model because it is a text-only 1.7B base causal LM with a standard transformer interface and permissive licence;
+2. `allenai/OLMo-2-0425-1B` — transparency-focused replication candidate with released training artifacts and a compact 1B architecture;
+3. `HuggingFaceTB/SmolLM3-3B-Base` — stronger fully open 3B candidate, expected to require QLoRA or a particularly conservative BF16 envelope on the 12 GB card;
+4. `Qwen/Qwen3.5-2B-Base` — a Phase II or secondary candidate rather than the clean Phase I primary, because its early-fusion multimodal pretraining and hybrid recurrent/attention architecture would change the interpretation of a language-only grounding experiment.
+
+The registry is evidence to test, not a hard-coded winner. Candidate order may change only through a dated model-selection report. Four-billion-parameter models are optional stress or replication candidates. Models of seven billion parameters or more are outside the local primary and confirmatory envelope unless later external compute is separately approved.
+
+#### Phase II model envelope
+
+The default Phase II model should remain in the 1.5–3B range so the 12 GB card has room for the sensor projector, latent world model, concept bridge, adapters, active-learning state, and closed-book evaluation. A 4B model may be used only after a hardware qualification shows a stable QLoRA envelope with the declared projector and sequence length. Long advertised context windows are not selection advantages for this project: Phase I should begin at 512 tokens and target 1,024; 2,048 is optional after qualification.
+
+No model identity is hard-coded into application logic. Record repository, immutable revision, licence, modality history, tokenizer hash, architecture class, precision/quantisation, trainable modules, total and trainable parameters, and the exact hardware qualification report hash.
 
 ### Model-stack continuity requirement
 
-The Phase I gate validates a particular learning stack, not all possible later models. If Phase II changes the base checkpoint, tokenizer, instruction-tuning posture, sensor codec or projector, adapter placement, trainable component set, or objective family, run a reduced **Phase I compatibility calibration** on the exact Phase II stack before the Phase II pilot. The compatibility run must pass the literal-learning, contingency, retention, leakage, reproducibility, and provenance criteria. It need not repeat the full L3/L4 abstract and metaphor battery.
+The Phase I gate validates a particular learning stack, not all possible later models. If Phase II changes the base checkpoint, tokenizer, instruction-tuning posture, pretraining modality, sensor codec or projector, adapter placement, precision or quantisation regime, trainable component set, or objective family, run a reduced **Phase I compatibility calibration** on the exact Phase II stack before the Phase II pilot. The compatibility run must pass the literal-learning, contingency, retention, leakage, reproducibility, hardware-envelope, and provenance criteria. It need not repeat the full L3/L4 abstract and metaphor battery.
 
-A Phase I pass from one model family may not be silently treated as evidence that another model family can use the sensor pathway.
+A Phase I pass from one model family, precision regime, or modality history may not be silently treated as evidence that another stack can use the sensor pathway.
 
 ### Hardware posture
 
-All smoke and unit tests remain CPU-only. Phase I and a reduced Phase II pilot must run sequentially on one consumer NVIDIA GPU. The architecture must support checkpointing, gradient accumulation, QLoRA where compatible, and offline trajectory collection so that expensive online interaction is not repeated unnecessarily.
+The reference local accelerator is a single **NVIDIA GeForce RTX 5070 with 12 GB GDDR7 VRAM**. The software must query measured total and free VRAM at runtime rather than relying on the marketing capacity. All scientific training runs are sequential and single-GPU.
+
+A stack is hardware-qualified only when it:
+
+- leaves at least 15% of measured VRAM, and no less than 1.5 GiB, unused at the observed peak;
+- completes forward, backward, optimiser, checkpoint-save, checkpoint-reload, likelihood-scoring, and hidden-state-capture probes without OOM recovery changing the declared configuration;
+- supports batch size 1 with gradient accumulation and gradient checkpointing at the required sequence length;
+- records peak allocated and reserved VRAM, host RAM, step time, power/runtime metadata where available, and CUDA fragmentation or OOM events;
+- uses CPU offload only as an explicitly separate engineering or robustness condition, never silently in one treatment but not another.
+
+The initial qualification grid is sequence lengths 256, 512, 1,024, and optional 2,048; LoRA ranks 8, 16, and optional 32; and BF16 LoRA versus NF4 QLoRA where supported. The primary stack should use the least compressed regime that passes with the required reserve.
+
+The workstation operating environment is part of the stack fingerprint. Qualify native Windows and/or WSL2/Linux explicitly; do not assume they are equivalent. Prefer the environment that provides stable official Blackwell (`sm_120`) kernels across PyTorch, quantisation, and adapter dependencies. Pin driver, CUDA runtime, PyTorch, `transformers`, `peft`, `accelerate`, `bitsandbytes`, and all optional kernel packages. Standard PyTorch SDPA is the compatibility baseline; FlashAttention, Unsloth, custom Triton kernels, and `torch.compile` remain optional until separately qualified and numerically compared.
+
+All smoke and ordinary unit tests remain CPU-only. Milestones 0, 1, and most of Milestone 2 remain runnable without the GPU workstation. The project must move to the RTX 5070 for the model-selection gate described below and remain there for Milestones 3 and 4 scientific execution.
+
+### Pre-treatment hardware and model-selection gate
+
+Insert a mandatory **M2.5 hardware qualification and model-selection gate** after benchmark mechanics, scoring, leakage, and retention interfaces exist, but before the final `v1_core` benchmark is frozen and before any treatment training.
+
+The gate uses two data resources that can never become outcome data:
+
+- `selection_probe_v1`: a small, frozen, model-selection-only set testing literal language competence, abstract relation sensitivity, metaphor response range, option-order stability, likelihood access, and floor/ceiling risk;
+- `engineering_adaptation_v1`: synthetic, schema-neutral records used only for one-step and short-run LoRA/QLoRA, save/reload, memory, determinism, and throughput probes.
+
+No final `v1_core` item, evaluation metaphor, or treatment episode may be used to tune candidate choice, adapter placement, rank, sequence length, or quantisation.
+
+Each candidate receives one of:
+
+- `QUALIFIED_PRIMARY`;
+- `QUALIFIED_REPLICATION`;
+- `CONDITIONAL`;
+- `REJECTED`.
+
+A `QUALIFIED_PRIMARY` result requires:
+
+1. exact immutable model and tokenizer revisions and acceptable licence;
+2. correct classification of base/instruction status and text-only/multimodal pretraining history;
+3. stable offline load, logits, hidden states, sensor-embedding injection, and checkpoint round-trip;
+4. a reproducible LoRA training step and short engineering run;
+5. the declared VRAM reserve at 1,024 tokens, or a documented owner-approved 512-token primary envelope;
+6. no fatal floor or ceiling on `selection_probe_v1` and defensible likelihood calibration;
+7. no need to train the complete lexical embedding matrix;
+8. projected Phase I matrix runtime that is feasible on one workstation;
+9. complete provenance and a clean Git commit.
+
+The selected stack, fallback stack, rejected candidates, memory curves, screening scores, and rationale are frozen in a model-selection report. Milestone 3 may implement only a selected or explicitly requalified stack.
 
 ---
 
@@ -490,7 +554,9 @@ Provide a simple inspection renderer and a low-resolution model-input renderer. 
 
 ### Phase I opaque codec
 
-Retain the reversible opaque discrete codec using semantically meaningless new tokens such as `<u0041>`. It verifies end-to-end learning without relying on pretrained lexical meanings.
+Retain a reversible opaque discrete codec using semantically meaningless sensor IDs such as `u0041`, but do **not** require tokenizer-vocabulary expansion or make the full lexical embedding matrix trainable. Map sensor and action IDs through small dedicated embedding tables into the language model hidden dimension and inject them through `inputs_embeds` or an equivalent reviewed interface, with existing frozen delimiter/control tokens marking modality boundaries where needed.
+
+The codec must remain reversible to the experiment state, semantically opaque to the pretrained tokenizer, configuration-driven, and identical across matched conditions. Record the sensor-table size and trainable parameter count separately from language LoRA. A tokenizer-expansion implementation may exist only as a secondary ablation with its own stack fingerprint.
 
 ### Phase II multimodal projector
 
@@ -791,7 +857,7 @@ Configuration may enable:
 - action head;
 - concept bridge;
 - language LoRA on selected attention and MLP projections;
-- new action and sensor token embeddings;
+- small dedicated action and sensor embedding tables or projectors injected without training the full lexical embedding matrix;
 - optional hypothesis-confidence head.
 
 Record both total trainable parameters and parameters active during closed-book text evaluation.
@@ -1047,6 +1113,8 @@ unfrozen-schemas/
 ├── AGENTS.md
 ├── CODEX_SPEC.md
 ├── README.md
+├── PROJECT_HISTORY.md
+├── RESEARCH_LOG.md
 ├── LICENSE
 ├── CITATION.cff
 ├── pyproject.toml
@@ -1065,8 +1133,18 @@ unfrozen-schemas/
 │   │   ├── phase1_confirmatory.yaml
 │   │   ├── phase2_pilot.yaml
 │   │   └── phase2_confirmatory.yaml
+│   ├── hardware/
+│   │   ├── rtx5070_12gb.yaml
+│   │   └── qualification_grid.yaml
+│   ├── selection/
+│   │   └── model_selection.yaml
 │   ├── model/
 │   │   ├── tiny_random.yaml
+│   │   ├── candidates/
+│   │   │   ├── qwen3_1p7b_base.yaml
+│   │   │   ├── olmo2_1b_base.yaml
+│   │   │   ├── smollm3_3b_base.yaml
+│   │   │   └── qwen3p5_2b_base_phase2.yaml
 │   │   ├── phase1_base_lora.yaml
 │   │   ├── phase2_instruction_lora.yaml
 │   │   └── replication_model.yaml
@@ -1165,10 +1243,18 @@ unfrozen-schemas/
 │       │   ├── leakage.py
 │       │   ├── budgets.py
 │       │   └── hashing.py
+│       ├── hardware/
+│       │   ├── profile.py
+│       │   ├── cuda_probe.py
+│       │   ├── memory_probe.py
+│       │   └── qualification.py
 │       ├── models/
 │       │   ├── loader.py
 │       │   ├── tokenizer.py
+│       │   ├── candidate_registry.py
+│       │   ├── selection.py
 │       │   ├── lora.py
+│       │   ├── quantisation.py
 │       │   ├── objectives.py
 │       │   ├── sensor_embeddings.py
 │       │   └── checkpoint.py
@@ -1220,6 +1306,8 @@ unfrozen-schemas/
 │           └── templates/
 ├── benchmarks/
 │   ├── source/
+│   ├── selection/
+│   │   └── selection_probe_v1/
 │   ├── frozen/
 │   │   ├── v1_core/
 │   │   └── v2_rich/
@@ -1240,8 +1328,16 @@ unfrozen-schemas/
 │   ├── preregistration.md
 │   ├── benchmark-card.md
 │   ├── model-card-template.md
+│   ├── hardware-profile.md
+│   ├── model-selection-plan.md
+│   ├── model-selection-report.md
 │   ├── data-card.md
 │   ├── implementation-plan.md
+│   ├── release-and-archive-process.md
+│   ├── document-ingest-workflow.md
+│   ├── release-notes/
+│   │   ├── milestone-template.md
+│   │   └── scientific-checkpoint-template.md
 │   └── open-questions.md
 ├── tests/
 │   ├── unit/
@@ -1258,6 +1354,8 @@ unfrozen-schemas/
 ├── runs/
 │   └── .gitkeep
 └── reports/
+    ├── model-selection/
+    │   └── .gitkeep
     ├── phase-gates/
     │   └── .gitkeep
     └── .gitkeep
@@ -1273,6 +1371,7 @@ Use:
 - `uv` for dependency and virtual-environment management;
 - PyTorch;
 - Hugging Face `transformers`, `accelerate`, and `peft`;
+- `bitsandbytes` as a pinned optional GPU extra for qualified NF4 QLoRA stacks;
 - `safetensors` for checkpoints;
 - Pydantic for validated configuration;
 - Typer for the CLI;
@@ -1289,6 +1388,8 @@ Environment requirements:
 - optional image rendering may use Pillow or Pygame without becoming a scientific dependency;
 - expose Gymnasium-style reset/step interfaces without requiring Gymnasium if a smaller internal protocol is sufficient;
 - keep optional vision encoders and online-RL libraries behind extras;
+- use standard PyTorch scaled-dot-product attention as the baseline and qualify custom attention/Triton kernels separately;
+- require an `sm_120` hardware probe and exact CUDA/PyTorch/quantisation package fingerprint before a real-model run;
 - do not require a cloud experiment tracker.
 
 No notebook may contain production logic absent from `src/`. Store local run artifacts and complete provenance first. Make external trackers optional adapters.
@@ -1296,6 +1397,19 @@ No notebook may contain production logic absent from `src/`. Store local run art
 ---
 
 ## 16. Command-line interface
+
+Required hardware and model-selection commands:
+
+```bash
+uv run unfrozen probe-hardware --profile configs/hardware/rtx5070_12gb.yaml
+uv run unfrozen build-selection-probe --version selection_probe_v1
+uv run unfrozen qualify-model --candidate configs/model/candidates/qwen3_1p7b_base.yaml \
+  --hardware configs/hardware/rtx5070_12gb.yaml
+uv run unfrozen compare-model-candidates --selection-config configs/selection/model_selection.yaml
+uv run unfrozen approve-model-selection --report reports/model-selection/model_selection_report.json \
+  --signer <name>
+uv run unfrozen verify-model-selection --approval reports/model-selection/model_selection_approval.yaml
+```
 
 Required Phase I commands:
 
@@ -1354,6 +1468,12 @@ All commands require:
 ---
 
 ## 17. Data formats and resource accounting
+
+### Hardware qualification and model-selection records
+
+`hardware_qualification.json` stores the measured GPU name, compute capability, total/free/peak VRAM, OS/environment, driver, CUDA runtime, PyTorch and package versions, precision regime, sequence length, batch and accumulation settings, adapter targets/rank, checkpointing, step times, OOM events, and qualification status.
+
+`model_selection_report.json` stores candidate revisions, licences, modality/pretraining classification, architecture and tokenizer hashes, selection-probe item-level scores, memory curves, training/save/reload checks, projected matrix runtime, status, rationale, selected primary/fallback stacks, and hashes. The approval is bound to the report, selection-probe version, hardware profile, Git commit, and specification revision.
 
 ### Episode metadata
 
@@ -1555,9 +1675,11 @@ Pin hashes for:
 - budget calculations;
 - primary metric and learning-curve calculations.
 
-### GPU smoke tests
+### GPU smoke and hardware-qualification tests
 
-Separately marked tests may load a small real model and optional vision encoder, perform one staged update, save/reload adapters, and score one closed-book item. They are not run in ordinary CI.
+Separately marked tests may load a candidate real model, inject the dedicated sensor embedding table, perform forward/backward/optimiser steps, save/reload adapters, capture hidden states, and score a selection-probe item. They are not run in ordinary CI.
+
+The RTX 5070 qualification suite must test BF16 LoRA and, where supported, NF4 QLoRA at the declared sequence/rank grid; enforce the VRAM reserve; preserve OOM and fallback events; verify that lexical embeddings remain frozen; and reject any stack that silently changes device placement, precision, sequence length, or CPU offload. These are engineering/model-selection results, not Phase I treatment evidence.
 
 ---
 
@@ -1588,6 +1710,21 @@ Separately marked tests may load a small real model and optional vision encoder,
 23. Require a Phase I compatibility calibration whenever the Phase II model stack materially differs from the gated Phase I stack.
 24. Preserve Phase I datasets, checkpoints, item-level results, failed runs, reports, and approvals as permanent research artifacts.
 25. Phase II scientific commands must refuse to run without a valid, hash-matched Phase I `PASS` approval.
+26. No final Phase I benchmark item may be used for hardware tuning, candidate ranking, adapter-rank selection, or quantisation selection.
+27. Freeze and quarantine `selection_probe_v1`; it may never be promoted into `v1_core` outcome data.
+28. Do not pool BF16 LoRA and QLoRA as one stack or attribute a quantisation-induced change to sensorimotor learning.
+29. Keep the lexical embedding matrix frozen in the primary stack and report sensor/action embedding parameters separately.
+30. Enforce the measured RTX 5070 VRAM reserve; an OOM-triggered silent configuration change invalidates comparability.
+31. Record native Windows versus WSL2/Linux as materially different environment fingerprints until empirical equivalence is demonstrated.
+32. Treat `origin/main` as the canonical public software and scientific history; a local-only merge is incomplete until pushed.
+33. A milestone is not complete until its reviewed changes are merged into `origin/main`, the merged commit is annotated with the declared milestone tag, that tag is pushed, a GitHub Release is published, and `PROJECT_HISTORY.md` plus `RESEARCH_LOG.md` are current.
+34. Never move, delete, or silently reuse a published milestone or scientific-checkpoint tag. Corrections receive a new tag and release.
+35. Start publishable scientific runs only from a clean, merged, tagged commit. Branch-head experiments remain exploratory unless separately frozen and approved.
+36. Keep engineering milestone tags distinct from scientific freeze/checkpoint tags. A software milestone release must not be represented as a preregistration, benchmark freeze, gate result, or scientific finding.
+37. Preserve release notes, exact commit, specification hash, CI result, known limitations, artifact hashes, and advancement decision for every milestone release.
+38. Update `PROJECT_HISTORY.md` for chronological project events and `RESEARCH_LOG.md` for changes in hypotheses, interpretations, and experimental rationale. Neither file overrides `CODEX_SPEC.md` or a frozen preregistration.
+39. Ingest downloaded documentation only by exact filename from the declared operator staging directory; hash and inspect it before replacement, never use wildcard copies, and never commit unrelated downloads.
+40. The current owner-workstation documentation staging directory is `C:\Users\YuriFrusin\Downloads`. This is operator context only: code, tests, configs, manifests, CI, and scientific results must not depend on that path.
 
 ---
 
@@ -1600,19 +1737,48 @@ Deliver package scaffold, dependency lock, validated config system, Typer CLI, l
 Acceptance:
 
 - tests, lint, and static typing pass offline;
-- `unfrozen smoke` creates a complete toy run with resource accounting.
+- `unfrozen smoke` creates a complete toy run with resource accounting;
+- repository governance includes `PROJECT_HISTORY.md`, `RESEARCH_LOG.md`, `docs/release-and-archive-process.md`, and `docs/document-ingest-workflow.md`;
+- the reviewed Milestone 0 result is merged into `origin/main`, tagged `milestone-0-complete`, and published as a GitHub Release before Milestone 1 begins.
+
+### Cross-cutting milestone closeout
+
+Every Milestone 0–10 closes through the same canonical sequence:
+
+1. complete the milestone on a dedicated branch;
+2. run all declared local checks and inspect the complete diff;
+3. push the branch and open or update a pull request into `main`;
+4. require GitHub Actions and human review;
+5. merge into `origin/main`;
+6. synchronise local `main` using a fast-forward-only pull;
+7. create and push the immutable annotated milestone tag;
+8. publish the GitHub Release using the reviewed release-note template;
+9. update project and research history as part of the milestone branch or an explicitly linked closeout change; and
+10. begin the next milestone only from the tagged `main` commit.
+
+If a pull request is merged on GitHub, the merge itself is already remote; the local workstation must still synchronise. If a merge is performed locally, pushing `main` is mandatory. Tags require a separate push in either case.
 
 ### Milestone 1 — SchemaWorld Core
 
 Deliver deterministic CONTAINMENT and SUPPORT state transitions, matched counterfactuals, relation derivation, inspection renderer, Parquet manifests, and hashes.
 
-### Milestone 2 — frozen core benchmark
+### Milestone 2 — benchmark construction, hardware qualification, and model-stack freeze
 
-Deliver controlled abstract transfer, novel metaphor entailment, literal reasoning, option reversal, leakage audit, and immutable benchmark versioning before any treatment run.
+Deliver controlled abstract transfer, novel metaphor entailment, literal reasoning, option reversal, leakage and retention interfaces, the disjoint `selection_probe_v1`, the RTX 5070 hardware qualification, the dated model-selection report and approval, and immutable `v1_core` benchmark versioning before any treatment run.
 
-### Milestone 3 — Phase I adaptation pipeline
+Milestone 2 sequencing is mandatory:
 
-Deliver text, causal sensor, passive, shuffled, LoRA, replay, retention, checkpoint/resume, and likelihood evaluation.
+1. build benchmark schemas and candidate items;
+2. implement scoring, option reversal, leakage, and retention interfaces;
+3. execute **M2.5 hardware qualification and model selection** on the RTX 5070 using only the selection and engineering resources;
+4. resolve the primary/fallback model stack;
+5. freeze `v1_core` as M2.6 without using final items to tune the selected stack.
+
+The workstation transition therefore occurs at M2.5, not at the start of Milestone 3.
+
+### Milestone 3 — Phase I adaptation pipeline on the selected stack
+
+Implement the frozen text, causal sensor, passive, shuffled, LoRA/qualified-QLoRA, replay, retention, checkpoint/resume, likelihood evaluation, and dedicated sensor-embedding interfaces. Milestone 3 may not reopen model selection merely because another model is attractive; a changed stack requires a new selection/qualification artifact.
 
 ### Milestone 4 — Phase I calibration matrix and mandatory gate
 
@@ -1662,7 +1828,7 @@ Run at least three seeds, evaluate an untrained schema, and produce learning cur
 
 ### Milestone 8 — Phase II confirmatory study
 
-Deliver both schemas, at least five seeds for primary conditions, human-validated rich benchmark, frozen curriculum, preregistered co-primary contrasts, a second model family, compute/budget robustness, and optional lossless-text and sham-compute controls.
+Deliver both schemas, at least five seeds for primary conditions, human-validated rich benchmark, frozen curriculum, preregistered co-primary contrasts, a second hardware-qualified model family, compute/budget robustness, and optional lossless-text and sham-compute controls. The second local model should remain within the 12 GB envelope; a larger external-compute replication is a separately declared extension, not a hidden requirement.
 
 ### Milestone 9 — mechanistic integration analysis
 
@@ -1678,52 +1844,63 @@ Proceed only after written review. Deliver sensor and language specialists, conc
 
 Codex must be instructed to:
 
-- read `CODEX_SPEC.md`, `docs/scientific-design.md`, and `docs/implementation-plan.md` before changing code;
+- read `CODEX_SPEC.md`, `docs/scientific-design.md`, `docs/implementation-plan.md`, `docs/release-and-archive-process.md`, and `docs/document-ingest-workflow.md` before changing code;
 - implement one milestone at a time;
 - write or update tests before declaring a milestone complete;
 - preserve the distinction between Phase I mandatory calibration/gate and Phase II complementarity;
 - ensure abstract and metaphorical Phase I scores never determine gate status;
 - block Phase II scientific commands unless the Phase I approval and any required model-stack compatibility approval are valid;
 - never replace active/yoked, raw/language, causal/shuffled, or closed/open-book controls with simpler proxies without explicit approval;
-- keep model, environment, curriculum, condition, budget, and schema choices configuration-driven;
+- keep model, hardware, environment, precision/quantisation, curriculum, condition, budget, and schema choices configuration-driven;
+- require the approved model-selection and hardware-qualification artifacts before Milestone 3 real-model work;
+- preserve the primary model's frozen lexical embedding matrix and separate sensor/action embedding parameters;
+- never use final benchmark items for candidate or memory tuning;
 - use no network calls in unit tests;
 - never hard-code secrets or model tokens;
 - preserve frozen benchmark and curriculum versions;
 - account separately for external language, self-generated language, sensor data, environment steps, and compute;
 - stop and report if a requested change invalidates condition comparability;
 - record unresolved scientific decisions in `docs/open-questions.md` rather than guessing;
+- treat `origin/main` as canonical and never call a milestone complete on an unmerged branch;
+- require pull-request review, CI, merge, annotated tag push, GitHub Release, and history/log updates at milestone closeout;
+- preserve immutable published tags and create a new correction tag rather than moving an old one;
+- when the current task supplies local documentation, check `C:\Users\YuriFrusin\Downloads` for the exact named files, hash them, copy only those files, inspect the diff, and report any missing or duplicate candidates;
+- never make code, tests, configs, manifests, or CI depend on the owner-specific Downloads path;
 - make small reviewable changes and run lint, type checks, and tests after each task.
 
 ---
 
 ## 22. Initial Codex kickoff prompt
 
-Paste the following into Codex from an empty repository containing this specification:
+For a new implementation task, Codex must first establish the repository, branch, source-document, and milestone state. On the owner's Windows workstation, explicitly named downloaded Markdown documents normally arrive in:
 
 ```text
-You are the lead research-software engineer for the repository described in CODEX_SPEC.md.
-
-Read CODEX_SPEC.md in full. Then:
-
-1. Create AGENTS.md, docs/scientific-design.md, docs/implementation-plan.md, docs/budget-accounting.md, docs/phase-gate-protocol.md, and docs/open-questions.md.
-2. In docs/implementation-plan.md, translate Milestones 0–4 into small dependency-ordered work packages. Treat Milestones 5–10 as later roadmap items only.
-3. Explicitly describe the distinction between Phase I mandatory causal calibration/gate, Phase II language-scaffolded active grounding, and Phase III colony propagation.
-4. Specify that Phase I L3/L4 abstract and metaphorical results are non-gating, while literal learning, contingency, held-out transfer, retention, leakage, reproducibility, and provenance are hard-gate criteria.
-5. Implement Milestone 0 only. Do not implement SchemaWorld, active agents, or model training except for the minimal tiny-model fixture required by the smoke test.
-6. Use Python 3.11, uv, a src layout, Typer, Pydantic, pytest, Ruff, and static typing.
-7. Unit tests and the smoke command must run without network access, external model downloads, CUDA, or secrets.
-8. Ensure every toy run has a resolved config, complete provenance manifest, resource-budget ledger, and placeholder gate metadata.
-9. Run tests, lint, and type checks; fix failures.
-10. Review your diff against CODEX_SPEC.md and state every deviation explicitly.
-
-Do not silently broaden or narrow the scientific claims. Do not proceed to Milestone 1 until Milestone 0 acceptance criteria pass.
+C:\Users\YuriFrusin\Downloads
 ```
 
-Use a separate prompt for each later milestone. Do not ask Codex to build the entire research platform in one undifferentiated pass.
+Codex may use that directory only as an operator staging source. It must not create a runtime or scientific dependency on it.
+
+A task-specific prompt must instruct Codex to:
+
+1. inspect branch, remotes, working-tree state, current commit, tags, and relevant pull request;
+2. read `CODEX_SPEC.md` and all governing documents in full;
+3. inventory exact named source documents in the Downloads staging directory, calculate hashes, and refuse ambiguous or wildcard selection;
+4. work on one milestone or documentation revision only;
+5. preserve all scientific controls and gate semantics;
+6. run the complete declared quality suite;
+7. push only the task branch and leave a pull request ready for review;
+8. never merge, tag, publish a release, or begin the next milestone without explicit owner approval; and
+9. after a human-approved merge, use a separate closeout task to synchronise `main`, create and push the immutable annotated tag, publish the GitHub Release, and verify the remote state.
+
+The repository must use a separate prompt for every milestone and a separate post-merge closeout prompt. Do not ask Codex to build the complete programme in one undifferentiated pass.
 
 ---
 
 ## 23. Go/no-go decision rules
+
+### Hardware and model-selection decision
+
+Milestone 3 real-model work is blocked until a model-selection approval identifies one `QUALIFIED_PRIMARY` stack and its hardware report passes the RTX 5070 reserve, determinism, save/reload, likelihood, hidden-state, sensor-injection, and short-training criteria. `CONDITIONAL` or `REJECTED` candidates may not be substituted during a matrix run. A model, tokenizer, precision, adapter, sequence-length, operating-environment, or offload change invalidates the approval unless already included in the qualified envelope.
 
 ### Phase I decision
 
@@ -1762,16 +1939,22 @@ Do not proceed to a colony merely because it is architecturally attractive.
 
 ---
 
-## 24. Revision 4 implementation consequences
+## 24. Revision 6 implementation consequences
 
-Revision 4 changes implementation behaviour in four concrete ways:
+Revision 6 retains every Revision 5 hardware and model-selection constraint and adds ten repository-governance consequences:
 
-1. Phase I produces an auditable gate decision in addition to ordinary metrics.
-2. Phase II scientific commands are technically blocked without a current `PASS` approval.
-3. Phase I abstract and metaphorical scores are reported but cannot influence the gate algorithm.
-4. A materially changed Phase II model stack must pass a reduced Phase I compatibility calibration before rich-world experiments begin.
+1. `origin/main` is the canonical public history; local-only states are not milestone completions.
+2. The first required GPU work remains M2.5 on the RTX 5070 12 GB workstation.
+3. Every milestone closes through reviewed merge, local synchronisation, immutable annotated tag, pushed tag, and GitHub Release.
+4. Engineering milestone releases and scientific checkpoints use distinct tag namespaces and must not be conflated.
+5. `PROJECT_HISTORY.md` records chronological project state; `RESEARCH_LOG.md` records the evolution of hypotheses and rationale.
+6. Release notes must contain the exact merged commit, specification hash, CI result, changed scope, known limitations, unresolved decisions, and next authorised work.
+7. Published tags are immutable. Corrections receive a new correction tag and release rather than rewriting history.
+8. Publishable scientific runs begin only from a clean merged and tagged commit; branch-head runs are exploratory unless separately approved.
+9. Downloaded Markdown documents are ingested through exact-name and hash checks from the owner-workstation staging path `C:\Users\YuriFrusin\Downloads`.
+10. The Downloads path is human operator context only and may not become a code, CI, config, manifest, or scientific-data dependency.
 
-These safeguards preserve the clean Phase I experiment while allowing its most theoretically interesting null result—literal learning without distant language transfer—to motivate rather than terminate Phase II.
+These changes turn each milestone into a reproducible software-and-research checkpoint while preserving the 12 GB local-compute envelope and the mandatory Phase I scientific gate.
 
 ---
 
@@ -1795,4 +1978,86 @@ All of the following are informative:
 The repository must report these interpretations prospectively so that only one preferred result is not treated as scientific success.
 
 ---
+
+---
+
+## 26. Canonical GitHub history, releases, and document ingestion
+
+### Canonical remote state
+
+The canonical repository is `https://github.com/yurifrusin/unfrozen-schemas`. The canonical branch is `origin/main`. A branch push is reviewable work, not a completed milestone. A merged pull request is already present on GitHub, but every workstation must synchronise its local `main` with `git pull --ff-only origin main` before tagging or beginning new work.
+
+### Milestone tags
+
+Use immutable annotated tags:
+
+```text
+milestone-0-complete
+milestone-1-complete
+...
+milestone-10-complete
+```
+
+A correction after publication uses a new tag such as:
+
+```text
+milestone-1-correction-1
+```
+
+Never move or reuse a published tag.
+
+### Scientific-checkpoint tags
+
+Use separate tags for scientific freezes and decisions, for example:
+
+```text
+benchmark-v1-core-frozen
+phase1-preregistered-v1
+phase1-calibration-v1
+phase1-gate-v1
+phase2-pilot-v1
+paper-submission-YYYY-MM-DD
+```
+
+The release notes for `phase1-gate-v1` state `PASS`, `INCONCLUSIVE`, or `NO_GO`; the tag name itself does not prejudge the result.
+
+### GitHub Releases
+
+Every milestone tag and major scientific-checkpoint tag receives a GitHub Release. Each release records:
+
+- exact tag and commit;
+- pull request or review reference;
+- `CODEX_SPEC.md` SHA-256;
+- CI checks and execution environment;
+- files and work packages completed;
+- scientific invariants verified;
+- known limitations and unresolved questions;
+- artifact manifests and hashes rather than unlicensed or oversized artifacts;
+- advancement decision and next authorised milestone.
+
+### Project and research records
+
+`PROJECT_HISTORY.md` is chronological and factual. `RESEARCH_LOG.md` records changes in ideas, hypotheses, interpretations, and experimental motivation. Both are versioned, but neither replaces the authoritative specification, frozen benchmark, preregistration, model-selection approval, or phase-gate report.
+
+### Owner-workstation documentation staging
+
+The current owner-workstation staging directory is:
+
+```text
+C:\Users\YuriFrusin\Downloads
+```
+
+Codex should look there for explicitly named downloaded Markdown files such as an updated `CODEX_SPEC.md` before asking the owner to provide them again. It must:
+
+1. use exact filenames;
+2. report zero, one, or multiple matches;
+3. hash the selected source file before copying;
+4. back up or compare the current repository file;
+5. copy only the named document;
+6. inspect the resulting Git diff;
+7. preserve repository line-ending rules;
+8. report source and destination hashes; and
+9. leave unrelated Downloads content untouched.
+
+Codex cloud or any environment without access to the Windows path must stop and say that the local staging directory is inaccessible rather than inventing a file or using an older document silently.
 
