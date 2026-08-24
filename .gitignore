@@ -1,0 +1,76 @@
+# Local secrets (retain the documented template)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Python environments, caches, packaging, and coverage
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Generated runs and reports (retain directory placeholders)
+runs/*
+!runs/.gitkeep
+reports/*
+!reports/.gitkeep
+!reports/phase-gates/
+reports/phase-gates/*
+!reports/phase-gates/.gitkeep
+
+# Checkpoints, model caches, and downloaded weights
+checkpoints/
+models/downloaded/
+model-cache/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.gguf
+pytorch_model*.bin
+model*.bin
+
+# Additional local credential stores
+.secrets/
+secrets/
+credentials*.json
+
+# Raw, generated, private, or licensed data
+data/raw/
+data/licensed/
+data/generated/
+data/active_trajectories/
+data/yoked_trajectories/
+data/ledgers/
+data/norms/
+data/replay/
+benchmarks/private/
+
+# Temporary logs and local scratch space
+*.log
+logs/
+tmp/
+.cache/
+
+# Machine-specific editor and operating-system files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini

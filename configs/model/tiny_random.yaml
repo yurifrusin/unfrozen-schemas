@@ -1,0 +1,4 @@
+schema_version: "1"
+model_type: tiny_linear_fixture
+fixture_path: tests/fixtures/tiny_random_model.json
+expected_sha256: c4425d3f3fc1bb3fa25724b63af7ed76d21eb9880773495e2387aaf5360618a5

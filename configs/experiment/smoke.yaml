@@ -1,0 +1,12 @@
+schema_version: "1"
+run:
+  name: milestone-0-smoke
+  output_root: runs
+  seed: 1729
+  device: cpu
+  offline: true
+  requires_secret: false
+  engineering_only: true
+model_config: configs/model/tiny_random.yaml
+logging:
+  level: INFO
