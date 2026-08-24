@@ -21,16 +21,22 @@ The final acceptance section for every Milestone 0-10 incorporates this sequence
 milestone is not complete, and the next milestone is not authorised, until all steps finish:
 
 1. complete the scoped work on its dedicated branch and inspect the complete diff;
-2. push the branch and open or update a pull request into `main`;
-3. require declared CI checks and human review;
-4. merge the reviewed result into `origin/main`;
-5. synchronise local `main` using a fast-forward-only pull and verify a clean matching commit;
-6. create the immutable annotated engineering tag `milestone-N-complete`;
-7. push the tag explicitly;
+2. push the branch and end the implementation task with an open pull request into `main`;
+3. require declared CI and owner approval of the exact pull-request number and exact head SHA;
+4. use a separate Codex closeout task to revalidate that SHA, mergeability, CI, and absence of
+   unresolved review findings immediately before merging, stopping on any drift;
+5. merge only the exact approved pull request and, when authorised, a mechanically constrained
+   linked closeout PR that fills only predetermined release-note and project/research-history fields;
+6. synchronise local `main` using a fast-forward-only pull and verify the canonical closeout commit;
+7. create and explicitly push the immutable annotated engineering tag `milestone-N-complete`;
 8. publish a GitHub Release containing the exact commit, specification hash, CI result, scope,
    limitations, artifact hashes, advancement decision, and next authorised work;
 9. ensure `PROJECT_HISTORY.md` and `RESEARCH_LOG.md` are current; and
 10. begin the next milestone only from the tagged canonical commit.
+
+Any code, experimental, dependency, scientific-design, or unanticipated documentation change after
+approval requires renewed owner review. Tags and releases occur only after the canonical closeout
+commit is merged and verified.
 
 Engineering milestone tags remain distinct from scientific checkpoint tags such as
 `benchmark-v1-core-frozen`, `phase1-preregistered-v1`, and `phase1-gate-v1`. Published tags are
@@ -115,10 +121,12 @@ immutable; corrections receive a new correction tag and release.
   seed handling; Git commit/dirty capture; platform, Python, and installed-package capture; canonical
   JSON; SHA-256 artifact records; required budget fields; placeholder gate metadata; manifest start,
   success, and failure states; and an explicit bootstrap-failure record for failures before a valid
-  initial `RUNNING` manifest exists.
+  initial `RUNNING` manifest exists. Replace the unreleased resource-budget schema with version `2`,
+  including interval kind/start/end and exactly one typed measurement basis for every resource.
 - **Acceptance tests:** Round-trip every model; test clean and dirty temporary Git repositories;
   test deterministic seeds and IDs; ensure bootstrap and started-run failures retain the original
-  reason, the strongest valid record, partial artifacts, and partial accounting.
+  reason, the strongest valid record, partial artifacts, and partial accounting; validate measured,
+  derived, observed-zero, and unavailable semantics plus manifest/budget timestamp consistency.
 - **Scientific invariants:** Dirty state is never suppressed; external/self-generated language,
   sensor, environment, and compute fields remain separate; placeholder gate data cannot authorise
   Phase II.
@@ -195,7 +203,9 @@ immutable; corrections receive a new correction tag and release.
 - **Artifacts:** Complete governance set and a draft `docs/release-notes/milestone-0.md`.
 - **Failure modes and risks:** Tagging an unmerged commit, moving a tag, omitting failed work,
   copying unrelated Downloads content, or beginning Milestone 1 before release closeout.
-- **Completion criteria:** After human approval and merge, local `main` is synchronised,
+- **Completion criteria:** After owner approval of the exact PR and head SHA, the separately
+  authorised Codex closeout task merges and verifies the canonical closeout commit, local `main` is
+  synchronised,
   `milestone-0-complete` is pushed, a GitHub Release exists, and history/log records are current.
 - **Stop conditions:** Failed CI, unresolved review, dirty tag target, missing source-document hash,
   or inconsistent remote state.
@@ -654,12 +664,17 @@ GitHub Release, and current project/research records.
 - Use dedicated `codex/<milestone>-<purpose>` or `docs/<revision>-<purpose>` branches. Never combine
   milestones on one branch and never declare a milestone complete on a local or remote feature
   branch.
-- Treat `origin/main` as canonical. Push every task branch, review it through a pull request into
-  `main`, and require declared CI plus human review before merge.
+- Treat `origin/main` as canonical. End implementation tasks with an open pull request. Owner
+  approval names the exact PR and head SHA; only a separate closeout task may merge it after
+  revalidating that SHA, mergeability, CI, and unresolved-review state, stopping on drift.
+- Limit any approval-linked closeout PR to predetermined release-note and project/research-history
+  fields. Code, experiment, dependency, scientific-design, or unanticipated documentation changes
+  require renewed owner review.
 - After a GitHub merge, synchronise local `main` with `git pull --ff-only origin main`; after a local
   merge, push `main`. Verify the canonical commit and clean tree before tagging.
-- Create and explicitly push immutable annotated engineering tags `milestone-N-complete`. Never
-  move, delete, or reuse a published tag; corrections use a new correction tag and release.
+- Create and explicitly push immutable annotated engineering tags `milestone-N-complete` only after
+  the canonical closeout commit is merged and verified. Never move, delete, or reuse a published tag;
+  corrections use a new correction tag and release.
 - Keep engineering milestone tags distinct from scientific tags such as
   `benchmark-v1-core-frozen`, `phase1-preregistered-v1`, and `phase1-gate-v1`.
 - Publish a GitHub Release for every milestone and major scientific checkpoint. Release notes record

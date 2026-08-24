@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import socket
+from datetime import timedelta
 from pathlib import Path
 from typing import NoReturn
 
@@ -12,6 +13,7 @@ from typer.testing import CliRunner
 
 import unfrozen_schemas.cli as cli_module
 import unfrozen_schemas.smoke as smoke_module
+from unfrozen_schemas.budgets import ResourceBudget, ResourceField
 from unfrozen_schemas.cli import app
 from unfrozen_schemas.config import ResolvedSmokeConfig, sha256_file
 from unfrozen_schemas.constants import (
@@ -64,6 +66,7 @@ def test_offline_smoke_cli_writes_complete_hashed_run(
     )
     assert manifest.start_status == "STARTED"
     assert manifest.end_status == "COMPLETED"
+    assert manifest.schema_version == "2"
     assert manifest.failure_reason is None
     assert manifest.declared_random_seed == 314159
     assert manifest.device == "cpu"
@@ -75,6 +78,31 @@ def test_offline_smoke_cli_writes_complete_hashed_run(
     assert manifest.resource_budget.forward_passes == 1
     assert manifest.resource_budget.backward_passes == 0
     assert manifest.resource_budget.optimisation_steps == 0
+    budget = manifest.resource_budget
+    assert budget.schema_version == "2"
+    assert budget.interval_kind == "run"
+    assert budget.interval_start == manifest.started_at
+    assert budget.interval_end == manifest.ended_at
+    assert budget.measurement_basis["elapsed_compute_seconds"].status == "measured"
+    assert "time.perf_counter" in budget.measurement_basis["elapsed_compute_seconds"].method
+    assert budget.measurement_basis["peak_memory_bytes"].status == "measured"
+    assert "tracemalloc" in budget.measurement_basis["peak_memory_bytes"].method
+    assert budget.peak_memory_bytes is not None
+    assert budget.measurement_basis["stored_artifact_count"].status == "derived"
+    assert budget.measurement_basis["stored_artifact_bytes"].status == "derived"
+    assert budget.measurement_basis["forward_passes"].status == "measured"
+    unused_fields: tuple[ResourceField, ...] = (
+        "external_language_tokens",
+        "self_generated_language_tokens",
+        "sensor_observations",
+        "sensor_bytes",
+        "environment_steps",
+        "optimisation_steps",
+        "backward_passes",
+    )
+    for unused_field in unused_fields:
+        assert budget.measurement_basis[unused_field].status == "observed_zero"
+        assert getattr(budget, unused_field) == 0
     assert manifest.phase1_gate_metadata.status == "NOT_EVALUATED"
     assert manifest.phase1_gate_metadata.permits_phase2_scientific_work is False
 
@@ -87,9 +115,25 @@ def test_offline_smoke_cli_writes_complete_hashed_run(
         artifact_bytes += record.size_bytes
     assert manifest.resource_budget.stored_artifact_count == len(manifest.artifacts)
     assert manifest.resource_budget.stored_artifact_bytes == artifact_bytes
+    persisted_budget = ResourceBudget.model_validate_json(
+        (run_directory / BUDGET_FILENAME).read_text(encoding="utf-8")
+    )
+    assert persisted_budget == budget
 
     restored = RunManifest.model_validate_json(manifest.model_dump_json())
     assert restored == manifest
+
+    open_terminal = manifest.model_dump()
+    open_terminal["resource_budget"]["interval_end"] = None
+    with pytest.raises(ValueError, match="terminal resource interval"):
+        RunManifest.model_validate(open_terminal)
+
+    mismatched_start = manifest.model_dump()
+    mismatched_start["resource_budget"]["interval_start"] = manifest.started_at - timedelta(
+        seconds=1
+    )
+    with pytest.raises(ValueError, match="start with the surrounding run manifest"):
+        RunManifest.model_validate(mismatched_start)
 
 
 def test_validate_config_cli_uses_pinned_local_fixture() -> None:
@@ -122,6 +166,8 @@ def test_smoke_cli_reports_nonzero_with_valid_claimed_bootstrap_artifact(
     assert str(bootstrap_path) in result.output
     record = BootstrapFailureRecord.model_validate_json(bootstrap_path.read_text(encoding="utf-8"))
     assert record.original_failure_reason == "PermissionError: cli bootstrap sentinel"
+    assert record.resource_budget.interval_start == record.started_at
+    assert record.resource_budget.interval_end == record.ended_at
 
 
 def test_smoke_cli_does_not_claim_an_artifact_when_recording_failed(

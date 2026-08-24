@@ -74,7 +74,7 @@ class Phase1GateMetadata(FrozenRecord):
 class RunManifest(FrozenRecord):
     """Complete Milestone 0 run manifest for success and clean failure paths."""
 
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     run_id: str
     run_kind: Literal["milestone_0_smoke"] = "milestone_0_smoke"
     scientific_phase: Literal[0] = 0
@@ -106,11 +106,21 @@ class RunManifest(FrozenRecord):
     def validate_terminal_state(self) -> RunManifest:
         """Keep final status, timestamp, and failure reason mutually consistent."""
 
+        if self.resource_budget.run_id != self.run_id:
+            raise ValueError("The resource budget run ID must match the manifest run ID")
+        if self.resource_budget.interval_kind != "run":
+            raise ValueError("A run manifest requires a run-kind resource interval")
+        if self.resource_budget.interval_start != self.started_at:
+            raise ValueError("The resource budget must start with the surrounding run manifest")
         if self.end_status == "RUNNING":
             if self.ended_at is not None or self.failure_reason is not None:
                 raise ValueError("A running manifest cannot have an end time or failure reason")
+            if self.resource_budget.interval_end is not None:
+                raise ValueError("A running manifest requires an open resource interval")
         elif self.ended_at is None:
             raise ValueError("A terminal manifest requires an end time")
+        elif self.resource_budget.interval_end != self.ended_at:
+            raise ValueError("A terminal resource interval must end with its run manifest")
         if self.end_status == "FAILED" and not self.failure_reason:
             raise ValueError("A failed manifest requires a failure reason")
         if self.end_status == "COMPLETED" and self.failure_reason is not None:
@@ -121,7 +131,7 @@ class RunManifest(FrozenRecord):
 class BootstrapFailureRecord(FrozenRecord):
     """Failure provenance when a complete terminal run manifest cannot be guaranteed."""
 
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     record_kind: Literal["milestone_0_bootstrap_failure"] = "milestone_0_bootstrap_failure"
     run_id: str
     scientific_phase: Literal[0] = 0
@@ -131,6 +141,8 @@ class BootstrapFailureRecord(FrozenRecord):
     failure_stage: str = Field(min_length=1)
     original_exception_type: str = Field(min_length=1)
     original_failure_reason: str = Field(min_length=1)
+    started_at: datetime
+    ended_at: datetime
     recorded_at: datetime
     git: GitState
     resolved_configuration: ResolvedSmokeConfig
@@ -142,6 +154,20 @@ class BootstrapFailureRecord(FrozenRecord):
     last_manifest_path: str | None
     last_manifest_status: Literal["RUNNING", "COMPLETED", "FAILED"] | None
     recording_errors: list[str]
+
+    @model_validator(mode="after")
+    def validate_terminal_budget(self) -> BootstrapFailureRecord:
+        if self.resource_budget.run_id != self.run_id:
+            raise ValueError("The resource budget run ID must match the bootstrap record run ID")
+        if self.resource_budget.interval_kind != "run":
+            raise ValueError("A bootstrap failure requires a run-kind resource interval")
+        if self.resource_budget.interval_start != self.started_at:
+            raise ValueError("The resource budget must start with the bootstrap failure interval")
+        if self.resource_budget.interval_end != self.ended_at:
+            raise ValueError("A bootstrap failure requires a closed matching resource interval")
+        if self.recorded_at < self.ended_at:
+            raise ValueError("A bootstrap failure cannot be recorded before its interval ends")
+        return self
 
 
 def utc_now() -> datetime:

@@ -16,16 +16,32 @@ This document defines how reviewed work becomes canonical project history. `CODE
 2. Implement one milestone or documentation revision only.
 3. Run all required checks and inspect the complete diff.
 4. Push the task branch.
-5. Open or update a pull request into `main`.
-6. Require GitHub Actions and human review.
-7. Merge only after approval.
-8. Synchronise local `main` by fast-forward only.
-9. Verify the merged commit and clean state.
-10. Create an annotated milestone tag.
-11. Push the tag explicitly.
-12. Publish a GitHub Release from the tag.
-13. Confirm `PROJECT_HISTORY.md` and `RESEARCH_LOG.md` are current.
-14. Begin the next milestone from the tagged `main` commit.
+5. Open or update a pull request into `main` and end the implementation task with that PR open.
+6. Require GitHub Actions and owner review of the exact PR number and exact head SHA.
+7. Start a separate Codex closeout task only after that explicit approval.
+8. Immediately revalidate the approved head SHA, mergeability, required CI, and absence of unresolved review findings; stop if any state has drifted.
+9. Merge only the exact approved pull request.
+10. If authorised and necessary, create a mechanically constrained linked closeout PR that fills only predetermined release-note, `PROJECT_HISTORY.md`, and `RESEARCH_LOG.md` fields.
+11. Merge the authorised closeout fields and verify the resulting canonical commit.
+12. Synchronise local `main` by fast-forward only and verify the clean matching state.
+13. Create and explicitly push the annotated milestone tag.
+14. Publish a GitHub Release from the tag.
+15. Confirm `PROJECT_HISTORY.md` and `RESEARCH_LOG.md` are current.
+16. Begin the next milestone from the tagged `main` commit.
+
+## Codex closeout authority
+
+Implementation authority ends with an open pull request. An owner approval is valid only for the
+exact pull-request number and exact head SHA stated by the owner. A separate Codex closeout task may
+merge only after checking that the approved SHA is still the head, the PR remains mergeable, every
+required CI check passes, and no unresolved review finding remains. Any drift invalidates approval
+and requires Codex to stop.
+
+The same approval may cover a linked closeout pull request only when its diff mechanically fills
+predetermined release-note, `PROJECT_HISTORY.md`, and `RESEARCH_LOG.md` fields. Any code,
+experimental, dependency, scientific-design, or unanticipated documentation change requires renewed
+owner review. Tags and GitHub Releases are created only after the canonical closeout commit is merged
+and verified.
 
 ## Milestone tags
 

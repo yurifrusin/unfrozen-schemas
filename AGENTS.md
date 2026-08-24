@@ -44,7 +44,12 @@ Implement one milestone at a time. Write or update tests before declaring a work
 
 - Treat `origin/main` as the canonical public history. A local merge is incomplete until `main` is pushed; a GitHub merge must be followed by local fast-forward synchronisation.
 - Use one dedicated branch per milestone or documentation revision. Never combine milestones on one branch.
-- Push the branch, open or update a pull request, require CI and human review, and do not auto-merge scientific work.
+- End every implementation task by pushing the branch and leaving an open pull request; do not merge in the implementation task.
+- The owner approves an exact pull-request number and exact head SHA. Only that explicit approval authorises a separate Codex closeout task to merge that exact pull request.
+- Immediately before merging, revalidate the approved head SHA, mergeability, required CI, and absence of unresolved review findings. Any drift invalidates approval and requires Codex to stop.
+- The same approval may authorise a mechanically constrained linked closeout pull request that fills only predetermined release-note, `PROJECT_HISTORY.md`, and `RESEARCH_LOG.md` fields.
+- Any code, experimental, dependency, scientific-design, or unanticipated documentation change after approval requires renewed owner review.
+- Create tags and releases only after the canonical closeout commit has been merged and verified.
 - A milestone is not complete until the reviewed work is merged into `origin/main`, its immutable annotated milestone tag is pushed, a GitHub Release is published, and `PROJECT_HISTORY.md` plus `RESEARCH_LOG.md` are current.
 - Never move, delete, or reuse a published milestone or scientific-checkpoint tag. Create a new correction tag and release.
 - Start publishable scientific runs only from a clean merged and tagged commit.

@@ -24,8 +24,19 @@ and peak VRAM. These extend rather than replace the required fields.
 
 ## Accounting boundaries
 
-- Each ledger declares its run ID, schema version, checkpoint or interval, start/end timestamps,
-  and whether values are measured, derived, or unavailable.
+- Milestone 0 uses resource-budget schema version `2`. Because no Milestone 0 release used version
+  `1`, version `2` replaces that underspecified schema without a compatibility layer. The enclosing
+  run-manifest and bootstrap-failure schemas also move to version `2` because they embed and validate
+  this contract.
+- Each ledger declares its run ID, interval kind, timezone-aware interval start, and interval end.
+  The end may be `null` only while the interval is open; every success, started-run failure, and
+  bootstrap-failure record closes the interval.
+- Every resource field has exactly one typed measurement-basis entry with a non-empty method and one
+  of four statuses: `measured`, `derived`, `observed_zero`, or `unavailable`.
+- `observed_zero` requires a numeric zero. `unavailable` requires a `null` value and reason.
+  `measured` and `derived` require non-null values. Interval end cannot precede interval start.
+- Run manifests require the embedded budget run ID and timestamps to match the surrounding manifest.
+  Terminal success and failure manifests require the same non-null end timestamp in both records.
 - Token totals name the tokenizer version and separate lossless serialisation from ordinary natural
   language.
 - Active and yoked runs retain pair IDs. Byte-identical trajectory claims require matching artifact
@@ -46,3 +57,10 @@ log is an information ceiling and must not be described as ordinary natural-lang
 
 Milestone 0 serialises the ledger as JSON for a complete offline toy run. Later milestones may add
 the specified Parquet representation without changing the meaning of existing counters.
+
+For the Milestone 0 smoke path, elapsed time is measured with `time.perf_counter`. Peak memory is
+measured with `tracemalloc` and means peak traced Python allocations, not total process RSS or system
+RAM; it is unavailable with a reason if tracing never starts. Stored artifact count and bytes are
+derived from the hash-stable retained run files. Forward invocations are counted. External and
+self-generated language, sensor observations and bytes, environment steps, backward passes, and
+optimisation steps are observed zero.

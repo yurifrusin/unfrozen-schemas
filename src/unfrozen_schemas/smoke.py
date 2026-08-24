@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from unfrozen_schemas.budgets import ResourceBudget
+from unfrozen_schemas.budgets import ResourceBudget, ResourceMeasurementBasis
 from unfrozen_schemas.config import ResolvedSmokeConfig
 from unfrozen_schemas.constants import (
     BOOTSTRAP_FAILURE_FILENAME,
@@ -121,6 +121,73 @@ class SmokeRunError(RuntimeError):
         return None
 
 
+_PERF_COUNTER_METHOD = "time.perf_counter monotonic wall-clock difference"
+_PEAK_MEMORY_METHOD = (
+    "tracemalloc peak traced Python allocations; excludes total process RSS and system RAM"
+)
+_ARTIFACT_COUNT_METHOD = "derived from hash-stable retained run files"
+_ARTIFACT_BYTES_METHOD = "derived from serialized sizes of hash-stable retained run files"
+
+
+def _basis(
+    status: Literal["measured", "derived", "observed_zero", "unavailable"],
+    method: str,
+    *,
+    reason: str | None = None,
+) -> ResourceMeasurementBasis:
+    return ResourceMeasurementBasis(status=status, method=method, reason=reason)
+
+
+def _initial_budget(run_id: str, started_at: datetime) -> ResourceBudget:
+    """Create the open Milestone 0 interval with truthful per-field measurement bases."""
+
+    unused_method = "observed absence in the Milestone 0 engineering smoke path"
+    return ResourceBudget(
+        run_id=run_id,
+        interval_kind="run",
+        interval_start=started_at,
+        interval_end=None,
+        external_language_tokens=0,
+        self_generated_language_tokens=0,
+        sensor_observations=0,
+        sensor_bytes=0,
+        environment_steps=0,
+        optimisation_steps=0,
+        forward_passes=0,
+        backward_passes=0,
+        elapsed_compute_seconds=0.0,
+        peak_memory_bytes=None,
+        stored_artifact_count=0,
+        stored_artifact_bytes=0,
+        measurement_basis={
+            "external_language_tokens": _basis("observed_zero", unused_method),
+            "self_generated_language_tokens": _basis("observed_zero", unused_method),
+            "sensor_observations": _basis("observed_zero", unused_method),
+            "sensor_bytes": _basis("observed_zero", unused_method),
+            "environment_steps": _basis("observed_zero", unused_method),
+            "optimisation_steps": _basis("observed_zero", unused_method),
+            "forward_passes": _basis(
+                "measured", "counted at each tiny fixture model forward invocation"
+            ),
+            "backward_passes": _basis("observed_zero", unused_method),
+            "elapsed_compute_seconds": _basis("measured", _PERF_COUNTER_METHOD),
+            "peak_memory_bytes": _basis(
+                "unavailable",
+                _PEAK_MEMORY_METHOD,
+                reason="tracemalloc measurement has not started",
+            ),
+            "stored_artifact_count": _basis("derived", _ARTIFACT_COUNT_METHOD),
+            "stored_artifact_bytes": _basis("derived", _ARTIFACT_BYTES_METHOD),
+        },
+    )
+
+
+def _validated_budget_update(budget: ResourceBudget, **updates: object) -> ResourceBudget:
+    data = budget.model_dump()
+    data.update(updates)
+    return ResourceBudget.model_validate(data)
+
+
 def _load_and_run_fixture(config: ResolvedSmokeConfig) -> ToyModelOutput:
     raw = json.loads(config.model.fixture_path.read_text(encoding="utf-8"))
     fixture = TinyLinearFixture.model_validate(raw)
@@ -151,15 +218,17 @@ def _write_budget_with_stable_size(
     existing_paths = [item for item in stable_paths if item.is_file()]
     count = len(existing_paths) + 1
     stored_bytes = sum(item.stat().st_size for item in existing_paths)
-    candidate = budget.model_copy(
-        update={"stored_artifact_count": count, "stored_artifact_bytes": stored_bytes}
+    candidate = _validated_budget_update(
+        budget,
+        stored_artifact_count=count,
+        stored_artifact_bytes=stored_bytes,
     )
     for _ in range(10):
         write_json(path, candidate)
         observed_bytes = sum(item.stat().st_size for item in existing_paths) + path.stat().st_size
         if observed_bytes == candidate.stored_artifact_bytes:
             return candidate
-        candidate = candidate.model_copy(update={"stored_artifact_bytes": observed_bytes})
+        candidate = _validated_budget_update(candidate, stored_artifact_bytes=observed_bytes)
     raise RuntimeError("Resource-budget artifact size did not reach a stable value")
 
 
@@ -231,16 +300,58 @@ def _snapshot_budget(
     *,
     start_tick: float,
     forward_passes: int,
+    interval_end: datetime | None,
 ) -> ResourceBudget:
-    observed_peak = tracemalloc.get_traced_memory()[1] if tracemalloc.is_tracing() else 0
-    return budget.model_copy(
-        update={
-            "forward_passes": max(budget.forward_passes, forward_passes),
-            "elapsed_compute_seconds": max(
-                budget.elapsed_compute_seconds, time.perf_counter() - start_tick
-            ),
-            "peak_memory_bytes": max(budget.peak_memory_bytes, observed_peak),
-        }
+    elapsed = time.perf_counter() - start_tick
+    previous_elapsed = budget.elapsed_compute_seconds or 0.0
+    previous_forward_passes = budget.forward_passes or 0
+    measurement_basis = dict(budget.measurement_basis)
+    peak_memory_bytes = budget.peak_memory_bytes
+    if tracemalloc.is_tracing():
+        observed_peak = tracemalloc.get_traced_memory()[1]
+        peak_memory_bytes = max(peak_memory_bytes or 0, observed_peak)
+        measurement_basis["peak_memory_bytes"] = _basis("measured", _PEAK_MEMORY_METHOD)
+    elif measurement_basis["peak_memory_bytes"].status != "measured":
+        peak_memory_bytes = None
+        measurement_basis["peak_memory_bytes"] = _basis(
+            "unavailable",
+            _PEAK_MEMORY_METHOD,
+            reason="tracemalloc was not active for this interval",
+        )
+    return _validated_budget_update(
+        budget,
+        interval_end=interval_end,
+        forward_passes=max(previous_forward_passes, forward_passes),
+        elapsed_compute_seconds=max(previous_elapsed, elapsed),
+        peak_memory_bytes=peak_memory_bytes,
+        measurement_basis=measurement_basis,
+    )
+
+
+def _terminal_budget_after_accounting_failure(
+    budget: ResourceBudget,
+    *,
+    ended_at: datetime,
+    accounting_error: Exception,
+) -> ResourceBudget:
+    """Close an interval without pretending failed measurements are available."""
+
+    reason = (
+        f"measurement finalisation failed: {type(accounting_error).__name__}: {accounting_error}"
+    )
+    measurement_basis = dict(budget.measurement_basis)
+    measurement_basis["elapsed_compute_seconds"] = _basis(
+        "unavailable", _PERF_COUNTER_METHOD, reason=reason
+    )
+    measurement_basis["peak_memory_bytes"] = _basis(
+        "unavailable", _PEAK_MEMORY_METHOD, reason=reason
+    )
+    return _validated_budget_update(
+        budget,
+        interval_end=ended_at,
+        elapsed_compute_seconds=None,
+        peak_memory_bytes=None,
+        measurement_basis=measurement_basis,
     )
 
 
@@ -300,6 +411,7 @@ def _record_full_failure(
     package_versions: dict[str, str],
     platform: PlatformInformation,
     started_at: datetime,
+    ended_at: datetime,
     reason: str,
     budget: ResourceBudget,
     gate_metadata: Phase1GateMetadata,
@@ -327,7 +439,7 @@ def _record_full_failure(
         package_versions=package_versions,
         platform=platform,
         started_at=started_at,
-        ended_at=utc_now(),
+        ended_at=ended_at,
         end_status="FAILED",
         failure_reason=reason,
         budget=budget,
@@ -367,6 +479,8 @@ def _record_bootstrap_failure(
     failure_stage: str,
     original_exception: Exception,
     reason: str,
+    started_at: datetime,
+    ended_at: datetime,
     budget: ResourceBudget,
     gate_metadata: Phase1GateMetadata,
     resolved_path: Path,
@@ -399,6 +513,8 @@ def _record_bootstrap_failure(
         failure_stage=failure_stage,
         original_exception_type=type(original_exception).__name__,
         original_failure_reason=reason,
+        started_at=started_at,
+        ended_at=ended_at,
         recorded_at=utc_now(),
         git=git,
         resolved_configuration=config,
@@ -464,10 +580,10 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
     package_versions = collect_package_versions()
     platform = collect_platform_information()
 
-    gate_metadata = Phase1GateMetadata()
-    budget = ResourceBudget(run_id=resolved_run_id)
     started_at = utc_now()
     start_tick = time.perf_counter()
+    gate_metadata = Phase1GateMetadata()
+    budget = _initial_budget(resolved_run_id, started_at)
     run_directory = config.run.output_root / resolved_run_id
     resolved_path = run_directory / RESOLVED_CONFIG_FILENAME
     gate_path = run_directory / GATE_METADATA_FILENAME
@@ -495,6 +611,12 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
         tracing_started_here = True
 
         failure_stage = "initial_artifact_writes"
+        budget = _snapshot_budget(
+            budget,
+            start_tick=start_tick,
+            forward_passes=forward_passes,
+            interval_end=None,
+        )
         write_json(resolved_path, config)
         write_json(gate_path, gate_metadata)
         write_json(budget_path, budget)
@@ -540,10 +662,12 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
         )
 
         failure_stage = "success_resource_accounting"
+        ended_at = utc_now()
         budget = _snapshot_budget(
             budget,
             start_tick=start_tick,
             forward_passes=forward_passes,
+            interval_end=ended_at,
         )
         if tracing_started_here and tracemalloc.is_tracing():
             tracemalloc.stop()
@@ -565,7 +689,7 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
             package_versions=package_versions,
             platform=platform,
             started_at=started_at,
-            ended_at=utc_now(),
+            ended_at=ended_at,
             end_status="COMPLETED",
             failure_reason=None,
             budget=budget,
@@ -587,6 +711,7 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
     except Exception as exc:
         reason = f"{type(exc).__name__}: {exc}"
         recording_errors: list[str] = []
+        ended_at = utc_now()
         if not run_declared_started and failure_stage == "initial_manifest_write":
             try:
                 interrupted_manifest = RunManifest.model_validate_json(
@@ -603,12 +728,24 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
                 budget,
                 start_tick=start_tick,
                 forward_passes=forward_passes,
+                interval_end=ended_at,
             )
         except Exception as accounting_error:
             recording_errors.append(
                 "failure resource accounting: "
                 f"{type(accounting_error).__name__}: {accounting_error}"
             )
+            try:
+                budget = _terminal_budget_after_accounting_failure(
+                    budget,
+                    ended_at=ended_at,
+                    accounting_error=accounting_error,
+                )
+            except Exception as fallback_error:
+                recording_errors.append(
+                    "failure resource-accounting fallback: "
+                    f"{type(fallback_error).__name__}: {fallback_error}"
+                )
         if logger is not None:
             try:
                 logger.error(
@@ -634,6 +771,7 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
                     package_versions=package_versions,
                     platform=platform,
                     started_at=started_at,
+                    ended_at=ended_at,
                     reason=reason,
                     budget=budget,
                     gate_metadata=gate_metadata,
@@ -665,6 +803,8 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
                     failure_stage=failure_stage,
                     original_exception=exc,
                     reason=reason,
+                    started_at=started_at,
+                    ended_at=ended_at,
                     budget=budget,
                     gate_metadata=gate_metadata,
                     resolved_path=resolved_path,

@@ -4,11 +4,12 @@
 
 ## Identity
 
-- Planned tag: `milestone-0-complete`
+- Tag: `<fill after canonical closeout>`
 - Canonical merged commit: `<fill after merge>`
 - Pull request: `https://github.com/yurifrusin/unfrozen-schemas/pull/1`
 - Release date: `<fill after release>`
-- Revision 6 `CODEX_SPEC.md` SHA-256: `658592b974d24ab6f0b9f742fa68d26cb4515a4a727239392bab0c5971fb864a`
+- Release URL: `<fill after release>`
+- Revision 6 `CODEX_SPEC.md` SHA-256: `<fill from the approved head>`
 
 ## Scope completed
 
@@ -16,7 +17,7 @@
 - Python 3.11 and `uv` project scaffold;
 - strict validated smoke configuration;
 - Typer CLI;
-- canonical JSON provenance, Git state, package/platform metadata, resource-budget ledger, and artifact hashes;
+- canonical JSON provenance, Git state, package/platform metadata, resource-budget schema version `2` with typed measurement bases, and artifact hashes;
 - offline CPU-only tiny-model smoke run;
 - success and failure-path tests;
 - Ruff, strict mypy, pytest, and GitHub Actions;
@@ -34,12 +35,12 @@
 
 ## Verification
 
-- CI workflow/run: `<fill after final branch push and merge>`
+- Final CI workflow/run: `<fill after canonical closeout>`
 - `uv sync --locked`: passed locally; 28 packages resolved and 27 checked
 - Ruff lint: passed locally
 - Ruff formatting: passed locally; 26 files already formatted
 - strict mypy: passed locally; 12 source files checked
-- pytest: passed locally; 24 tests
+- pytest: `<refresh after review-correction verification>`
 - offline smoke: passed locally; run `milestone-0-smoke-20260824T134648910348Z-984b6be49b`
 - merged tree clean and equal to `origin/main`: pending merge and post-merge closeout
 
@@ -61,6 +62,6 @@
 
 ## Advancement decision
 
-- Status: `NOT READY` — pending human review, merge, canonical sync, tag, and GitHub Release.
-- Next authorised work after release: Milestone 1 — SchemaWorld Core.
+- Status: `<fill after canonical closeout>`
+- Next authorised work: `<fill after canonical closeout>`
 - Owner/reviewer: `<fill after review>`

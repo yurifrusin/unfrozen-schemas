@@ -1558,6 +1558,19 @@ wall_seconds
 peak_vram_bytes
 ```
 
+Milestone 0 uses JSON resource-budget schema version `2`; no released artifact used version `1`, so
+there is no compatibility layer. The enclosing run-manifest and bootstrap-failure schemas also move
+to version `2` because they embed and validate this contract. Every budget declares its run ID,
+interval kind, timezone-aware start, and end (`null` only for an open interval). Every resource field
+has exactly one typed
+measurement-basis entry with a method, a status of `measured`, `derived`, `observed_zero`, or
+`unavailable`, and a reason whenever unavailable. Observed-zero values equal zero, unavailable values
+are null, measured and derived values are non-null, terminal intervals have an end, and budget
+timestamps match their surrounding run or bootstrap-failure record. Milestone 0 measures elapsed
+time with `time.perf_counter`, measures peak traced Python allocations with `tracemalloc` rather than
+claiming process RSS or system RAM, derives stored artifact totals, counts forward passes, and records
+unused language, sensor, environment, backward, and optimisation fields as observed zero.
+
 ### Benchmark table
 
 Retain revision 2 fields and add:
@@ -1747,14 +1760,19 @@ Every Milestone 0–10 closes through the same canonical sequence:
 
 1. complete the milestone on a dedicated branch;
 2. run all declared local checks and inspect the complete diff;
-3. push the branch and open or update a pull request into `main`;
-4. require GitHub Actions and human review;
-5. merge into `origin/main`;
-6. synchronise local `main` using a fast-forward-only pull;
-7. create and push the immutable annotated milestone tag;
-8. publish the GitHub Release using the reviewed release-note template;
-9. update project and research history as part of the milestone branch or an explicitly linked closeout change; and
+3. push the branch and end the implementation task with an open pull request into `main`;
+4. require GitHub Actions and owner review, with the owner explicitly approving the exact pull-request number and exact head SHA;
+5. in a separate Codex closeout task, immediately revalidate that approved head SHA, mergeability, required CI, and absence of unresolved review findings, stopping if any state has drifted;
+6. merge only the exact approved pull request after that revalidation;
+7. when needed, use the same explicit approval for a mechanically constrained linked closeout pull request that fills only predetermined release-note, `PROJECT_HISTORY.md`, and `RESEARCH_LOG.md` fields;
+8. merge and verify the canonical closeout commit, then synchronise local `main` using a fast-forward-only pull;
+9. only after canonical verification, create and push the immutable annotated milestone tag and publish the GitHub Release; and
 10. begin the next milestone only from the tagged `main` commit.
+
+Any head-SHA, mergeability, CI, or review-finding drift invalidates approval. Any code, experimental,
+dependency, scientific-design, or unanticipated documentation change after approval requires renewed
+owner review. A linked closeout pull request exceeds its authority if it changes anything other than
+the predetermined release-note and history/log fields.
 
 If a pull request is merged on GitHub, the merge itself is already remote; the local workstation must still synchronise. If a merge is performed locally, pushing `main` is mandatory. Tags require a separate push in either case.
 
@@ -1862,7 +1880,10 @@ Codex must be instructed to:
 - stop and report if a requested change invalidates condition comparability;
 - record unresolved scientific decisions in `docs/open-questions.md` rather than guessing;
 - treat `origin/main` as canonical and never call a milestone complete on an unmerged branch;
-- require pull-request review, CI, merge, annotated tag push, GitHub Release, and history/log updates at milestone closeout;
+- end implementation tasks with an open pull request and require owner approval of its exact number and head SHA;
+- perform any approved merge only in a separate closeout task after revalidating the exact SHA, mergeability, CI, and unresolved-review state, stopping on drift;
+- constrain any approval-linked closeout pull request to predetermined release-note and project/research-history fields, and require renewed review for code, dependency, experimental, scientific-design, or unanticipated documentation changes;
+- create tags and releases only after the canonical closeout commit is merged and verified;
 - preserve immutable published tags and create a new correction tag rather than moving an old one;
 - when the current task supplies local documentation, check `C:\Users\YuriFrusin\Downloads` for the exact named files, hash them, copy only those files, inspect the diff, and report any missing or duplicate candidates;
 - never make code, tests, configs, manifests, or CI depend on the owner-specific Downloads path;
@@ -1888,9 +1909,9 @@ A task-specific prompt must instruct Codex to:
 4. work on one milestone or documentation revision only;
 5. preserve all scientific controls and gate semantics;
 6. run the complete declared quality suite;
-7. push only the task branch and leave a pull request ready for review;
-8. never merge, tag, publish a release, or begin the next milestone without explicit owner approval; and
-9. after a human-approved merge, use a separate closeout task to synchronise `main`, create and push the immutable annotated tag, publish the GitHub Release, and verify the remote state.
+7. push only the task branch and end the implementation task with an open pull request ready for review;
+8. require the owner to approve the exact pull-request number and head SHA, and never merge in the implementation task; and
+9. use a separate closeout task to revalidate that exact SHA, mergeability, CI, and unresolved-review state before any approved merge, stop on drift, merge only authorised changes, verify canonical `main`, and only then tag and release.
 
 The repository must use a separate prompt for every milestone and a separate post-merge closeout prompt. Do not ask Codex to build the complete programme in one undifferentiated pass.
 
@@ -2060,4 +2081,3 @@ Codex should look there for explicitly named downloaded Markdown files such as a
 9. leave unrelated Downloads content untouched.
 
 Codex cloud or any environment without access to the Windows path must stop and say that the local staging directory is inaccessible rather than inventing a file or using an older document silently.
-
