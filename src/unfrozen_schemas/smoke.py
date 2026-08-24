@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import tracemalloc
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -14,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from unfrozen_schemas.budgets import ResourceBudget
 from unfrozen_schemas.config import ResolvedSmokeConfig
 from unfrozen_schemas.constants import (
+    BOOTSTRAP_FAILURE_FILENAME,
     BUDGET_FILENAME,
     GATE_METADATA_FILENAME,
     LOG_FILENAME,
@@ -24,7 +27,10 @@ from unfrozen_schemas.constants import (
 from unfrozen_schemas.logging_utils import close_logging, configure_logging
 from unfrozen_schemas.provenance import (
     ArtifactRecord,
+    BootstrapFailureRecord,
+    GitState,
     Phase1GateMetadata,
+    PlatformInformation,
     RunManifest,
     artifact_record,
     capture_git_state,
@@ -35,6 +41,8 @@ from unfrozen_schemas.provenance import (
     utc_now,
     write_json,
 )
+
+FailureArtifactKind = Literal["failure_manifest", "bootstrap_failure"]
 
 
 class TinyLinearFixture(BaseModel):
@@ -88,12 +96,29 @@ class SmokeResult(BaseModel):
 
 
 class SmokeRunError(RuntimeError):
-    """Raised after a failed run has been cleanly recorded."""
+    """Raised with the strongest validated failure artifact that could be written."""
 
-    def __init__(self, message: str, run_directory: Path, manifest_path: Path) -> None:
+    def __init__(
+        self,
+        message: str,
+        run_directory: Path,
+        failure_artifact_path: Path | None,
+        failure_artifact_kind: FailureArtifactKind | None,
+        recording_errors: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(message)
         self.run_directory = run_directory
-        self.manifest_path = manifest_path
+        self.failure_artifact_path = failure_artifact_path
+        self.failure_artifact_kind = failure_artifact_kind
+        self.recording_errors = recording_errors
+
+    @property
+    def manifest_path(self) -> Path | None:
+        """Return the failure-manifest path only when a full manifest was validated."""
+
+        if self.failure_artifact_kind == "failure_manifest":
+            return self.failure_artifact_path
+        return None
 
 
 def _load_and_run_fixture(config: ResolvedSmokeConfig) -> ToyModelOutput:
@@ -142,10 +167,31 @@ def _relative_artifacts(run_directory: Path, paths: list[Path]) -> list[Artifact
     return [artifact_record(run_directory, path) for path in paths if path.is_file()]
 
 
+def _best_effort_artifacts(
+    run_directory: Path,
+    paths: list[Path],
+    recording_errors: list[str],
+) -> list[ArtifactRecord]:
+    records: list[ArtifactRecord] = []
+    for path in paths:
+        if not path.is_file():
+            continue
+        try:
+            records.append(artifact_record(run_directory, path))
+        except Exception as exc:
+            recording_errors.append(
+                f"artifact accounting for {path.name}: {type(exc).__name__}: {exc}"
+            )
+    return records
+
+
 def _manifest(
     *,
     config: ResolvedSmokeConfig,
     run_id: str,
+    git: GitState,
+    package_versions: dict[str, str],
+    platform: PlatformInformation,
     started_at: datetime,
     ended_at: datetime | None,
     end_status: Literal["RUNNING", "COMPLETED", "FAILED"],
@@ -159,10 +205,10 @@ def _manifest(
     return RunManifest.model_validate(
         {
             "run_id": run_id,
-            "git": capture_git_state(config.repository_root),
+            "git": git,
             "resolved_configuration": config,
-            "package_versions": collect_package_versions(),
-            "platform": collect_platform_information(),
+            "package_versions": package_versions,
+            "platform": platform,
             "declared_random_seed": config.run.seed,
             "model_fixture_sha256": config.model.fixture_sha256,
             "started_at": started_at,
@@ -180,54 +226,309 @@ def _manifest(
     )
 
 
+def _snapshot_budget(
+    budget: ResourceBudget,
+    *,
+    start_tick: float,
+    forward_passes: int,
+) -> ResourceBudget:
+    observed_peak = tracemalloc.get_traced_memory()[1] if tracemalloc.is_tracing() else 0
+    return budget.model_copy(
+        update={
+            "forward_passes": max(budget.forward_passes, forward_passes),
+            "elapsed_compute_seconds": max(
+                budget.elapsed_compute_seconds, time.perf_counter() - start_tick
+            ),
+            "peak_memory_bytes": max(budget.peak_memory_bytes, observed_peak),
+        }
+    )
+
+
+def _ensure_initial_artifacts(
+    *,
+    resolved_path: Path,
+    config: ResolvedSmokeConfig,
+    gate_path: Path,
+    gate_metadata: Phase1GateMetadata,
+) -> None:
+    if not resolved_path.is_file():
+        write_json(resolved_path, config)
+    if not gate_path.is_file():
+        write_json(gate_path, gate_metadata)
+
+
+def _restore_initial_artifacts_best_effort(
+    *,
+    resolved_path: Path,
+    config: ResolvedSmokeConfig,
+    gate_path: Path,
+    gate_metadata: Phase1GateMetadata,
+    recording_errors: list[str],
+) -> None:
+    for label, path, value in (
+        ("resolved configuration", resolved_path, config),
+        ("gate metadata", gate_path, gate_metadata),
+    ):
+        if path.is_file():
+            continue
+        try:
+            write_json(path, value)
+        except Exception as exc:
+            recording_errors.append(f"{label} recovery: {type(exc).__name__}: {exc}")
+
+
+def _last_manifest_state(
+    manifest_path: Path,
+    recording_errors: list[str],
+) -> tuple[str | None, Literal["RUNNING", "COMPLETED", "FAILED"] | None]:
+    if not manifest_path.is_file():
+        return None, None
+    try:
+        manifest = RunManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        recording_errors.append(f"prior manifest validation: {type(exc).__name__}: {exc}")
+        return MANIFEST_FILENAME, None
+    return MANIFEST_FILENAME, manifest.end_status
+
+
+def _record_full_failure(
+    *,
+    config: ResolvedSmokeConfig,
+    run_id: str,
+    run_directory: Path,
+    git: GitState,
+    package_versions: dict[str, str],
+    platform: PlatformInformation,
+    started_at: datetime,
+    reason: str,
+    budget: ResourceBudget,
+    gate_metadata: Phase1GateMetadata,
+    resolved_path: Path,
+    gate_path: Path,
+    budget_path: Path,
+    toy_path: Path,
+    log_path: Path,
+    manifest_path: Path,
+    recording_errors: list[str],
+) -> Path:
+    _ensure_initial_artifacts(
+        resolved_path=resolved_path,
+        config=config,
+        gate_path=gate_path,
+        gate_metadata=gate_metadata,
+    )
+    stable_paths = [resolved_path, gate_path, toy_path, log_path]
+    budget = _write_budget_with_stable_size(budget_path, budget, stable_paths)
+    artifact_paths = [*stable_paths, budget_path]
+    failed_manifest = _manifest(
+        config=config,
+        run_id=run_id,
+        git=git,
+        package_versions=package_versions,
+        platform=platform,
+        started_at=started_at,
+        ended_at=utc_now(),
+        end_status="FAILED",
+        failure_reason=reason,
+        budget=budget,
+        gate_metadata=gate_metadata,
+        artifacts=_relative_artifacts(run_directory, artifact_paths),
+    )
+    write_error: Exception | None = None
+    try:
+        write_json(manifest_path, failed_manifest)
+    except Exception as exc:
+        write_error = exc
+    try:
+        restored = RunManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    except Exception as validation_error:
+        if write_error is not None:
+            raise write_error from validation_error
+        raise
+    if restored.end_status != "FAILED" or restored.failure_reason != reason:
+        raise RuntimeError("Failure manifest did not preserve the original failure reason")
+    if write_error is not None:
+        recording_errors.append(
+            f"failure manifest writer raised after producing valid output: "
+            f"{type(write_error).__name__}: {write_error}"
+        )
+    return manifest_path
+
+
+def _record_bootstrap_failure(
+    *,
+    config: ResolvedSmokeConfig,
+    run_id: str,
+    run_directory: Path,
+    git: GitState,
+    package_versions: dict[str, str],
+    platform: PlatformInformation,
+    run_declared_started: bool,
+    failure_stage: str,
+    original_exception: Exception,
+    reason: str,
+    budget: ResourceBudget,
+    gate_metadata: Phase1GateMetadata,
+    resolved_path: Path,
+    gate_path: Path,
+    budget_path: Path,
+    toy_path: Path,
+    log_path: Path,
+    manifest_path: Path,
+    bootstrap_path: Path,
+    recording_errors: list[str],
+) -> Path | None:
+    _restore_initial_artifacts_best_effort(
+        resolved_path=resolved_path,
+        config=config,
+        gate_path=gate_path,
+        gate_metadata=gate_metadata,
+        recording_errors=recording_errors,
+    )
+    stable_paths = [resolved_path, gate_path, toy_path, log_path]
+    try:
+        budget = _write_budget_with_stable_size(budget_path, budget, stable_paths)
+    except Exception as exc:
+        recording_errors.append(f"resource budget recovery: {type(exc).__name__}: {exc}")
+    artifact_paths = [*stable_paths, budget_path]
+    artifacts = _best_effort_artifacts(run_directory, artifact_paths, recording_errors)
+    last_manifest_path, last_manifest_status = _last_manifest_state(manifest_path, recording_errors)
+    record = BootstrapFailureRecord(
+        run_id=run_id,
+        run_declared_started=run_declared_started,
+        failure_stage=failure_stage,
+        original_exception_type=type(original_exception).__name__,
+        original_failure_reason=reason,
+        recorded_at=utc_now(),
+        git=git,
+        resolved_configuration=config,
+        package_versions=package_versions,
+        platform=platform,
+        declared_random_seed=config.run.seed,
+        resource_budget=budget,
+        artifacts=artifacts,
+        last_manifest_path=last_manifest_path,
+        last_manifest_status=last_manifest_status,
+        recording_errors=list(recording_errors),
+    )
+    write_error: Exception | None = None
+    try:
+        write_json(bootstrap_path, record)
+    except Exception as exc:
+        write_error = exc
+    try:
+        restored = BootstrapFailureRecord.model_validate_json(
+            bootstrap_path.read_text(encoding="utf-8")
+        )
+    except Exception as validation_error:
+        if write_error is not None:
+            recording_errors.append(
+                f"bootstrap failure record writing: {type(write_error).__name__}: {write_error}"
+            )
+        recording_errors.append(
+            "bootstrap failure record validation: "
+            f"{type(validation_error).__name__}: {validation_error}"
+        )
+        return None
+    if restored.original_failure_reason != reason:
+        recording_errors.append("bootstrap failure record did not preserve the original reason")
+        return None
+    if write_error is not None:
+        recording_errors.append(
+            f"bootstrap record writer raised after producing valid output: "
+            f"{type(write_error).__name__}: {write_error}"
+        )
+    return bootstrap_path
+
+
+def _close_logging_best_effort(
+    logger: logging.Logger | None,
+    recording_errors: list[str],
+) -> None:
+    if logger is None:
+        return
+    try:
+        close_logging(logger)
+    except Exception as exc:
+        recording_errors.append(f"logging shutdown: {type(exc).__name__}: {exc}")
+
+
 def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> SmokeResult:
     """Execute one complete, offline, CPU-only engineering smoke run."""
 
     resolved_run_id = create_run_id(config.run.name) if run_id is None else run_id
-    run_directory = config.run.output_root / resolved_run_id
-    run_directory.mkdir(parents=True, exist_ok=False)
 
+    # Provenance capture is a preflight: no run directory exists and no run is declared started if
+    # any of these operations fail.
+    git = capture_git_state(config.repository_root)
+    package_versions = collect_package_versions()
+    platform = collect_platform_information()
+
+    gate_metadata = Phase1GateMetadata()
+    budget = ResourceBudget(run_id=resolved_run_id)
+    started_at = utc_now()
+    start_tick = time.perf_counter()
+    run_directory = config.run.output_root / resolved_run_id
     resolved_path = run_directory / RESOLVED_CONFIG_FILENAME
     gate_path = run_directory / GATE_METADATA_FILENAME
     budget_path = run_directory / BUDGET_FILENAME
     toy_path = run_directory / TOY_OUTPUT_FILENAME
     log_path = run_directory / LOG_FILENAME
     manifest_path = run_directory / MANIFEST_FILENAME
+    bootstrap_path = run_directory / BOOTSTRAP_FAILURE_FILENAME
 
-    started_at = utc_now()
-    start_tick = time.perf_counter()
-    gate_metadata = Phase1GateMetadata()
-    budget = ResourceBudget(run_id=resolved_run_id)
-    logger = configure_logging(log_path, config.logging.level)
+    logger: logging.Logger | None = None
     tracing_was_active = tracemalloc.is_tracing()
-    if tracing_was_active:
-        tracemalloc.stop()
-    tracemalloc.start()
-
-    write_json(resolved_path, config)
-    write_json(gate_path, gate_metadata)
-    write_json(budget_path, budget)
-    logger.info(
-        "Milestone 0 smoke run started",
-        extra={"event": "smoke_started", "run_id": resolved_run_id},
-    )
-    initial_manifest = _manifest(
-        config=config,
-        run_id=resolved_run_id,
-        started_at=started_at,
-        ended_at=None,
-        end_status="RUNNING",
-        failure_reason=None,
-        budget=budget,
-        gate_metadata=gate_metadata,
-        artifacts=_relative_artifacts(run_directory, [resolved_path, gate_path, budget_path]),
-    )
-    write_json(manifest_path, initial_manifest)
-
+    tracing_started_here = False
+    run_declared_started = False
     forward_passes = 0
+    failure_stage = "logging_setup"
+
+    run_directory.mkdir(parents=True, exist_ok=False)
     try:
+        logger = configure_logging(log_path, config.logging.level)
+
+        failure_stage = "resource_tracking_setup"
+        if tracing_was_active:
+            tracemalloc.stop()
+        tracemalloc.start()
+        tracing_started_here = True
+
+        failure_stage = "initial_artifact_writes"
+        write_json(resolved_path, config)
+        write_json(gate_path, gate_metadata)
+        write_json(budget_path, budget)
+
+        failure_stage = "initial_manifest_construction"
+        initial_manifest = _manifest(
+            config=config,
+            run_id=resolved_run_id,
+            git=git,
+            package_versions=package_versions,
+            platform=platform,
+            started_at=started_at,
+            ended_at=None,
+            end_status="RUNNING",
+            failure_reason=None,
+            budget=budget,
+            gate_metadata=gate_metadata,
+            artifacts=_relative_artifacts(run_directory, [resolved_path, gate_path, budget_path]),
+        )
+        failure_stage = "initial_manifest_write"
+        write_json(manifest_path, initial_manifest)
+        RunManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+        run_declared_started = True
+
+        failure_stage = "start_log_write"
+        logger.info(
+            "Milestone 0 smoke run started",
+            extra={"event": "smoke_started", "run_id": resolved_run_id},
+        )
+
+        failure_stage = "fixture_execution"
         toy_output = _load_and_run_fixture(config)
         forward_passes = 1
+        failure_stage = "toy_artifact_write"
         write_json(toy_path, toy_output)
         logger.info(
             "Tiny local fixture forward pass completed",
@@ -237,28 +538,32 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
                 "device": "cpu",
             },
         )
-        elapsed_seconds = time.perf_counter() - start_tick
-        peak_memory = tracemalloc.get_traced_memory()[1]
-        tracemalloc.stop()
+
+        failure_stage = "success_resource_accounting"
+        budget = _snapshot_budget(
+            budget,
+            start_tick=start_tick,
+            forward_passes=forward_passes,
+        )
+        if tracing_started_here and tracemalloc.is_tracing():
+            tracemalloc.stop()
+            tracing_started_here = False
         logger.info(
             "Milestone 0 smoke run completed",
             extra={"event": "smoke_completed", "run_id": resolved_run_id},
         )
         close_logging(logger)
 
-        budget = budget.model_copy(
-            update={
-                "forward_passes": forward_passes,
-                "elapsed_compute_seconds": elapsed_seconds,
-                "peak_memory_bytes": peak_memory,
-            }
-        )
+        failure_stage = "success_artifact_finalization"
         stable_paths = [resolved_path, gate_path, toy_path, log_path]
         budget = _write_budget_with_stable_size(budget_path, budget, stable_paths)
         artifact_paths = [*stable_paths, budget_path]
         final_manifest = _manifest(
             config=config,
             run_id=resolved_run_id,
+            git=git,
+            package_versions=package_versions,
+            platform=platform,
             started_at=started_at,
             ended_at=utc_now(),
             end_status="COMPLETED",
@@ -268,6 +573,11 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
             artifacts=_relative_artifacts(run_directory, artifact_paths),
         )
         write_json(manifest_path, final_manifest)
+        restored_manifest = RunManifest.model_validate_json(
+            manifest_path.read_text(encoding="utf-8")
+        )
+        if restored_manifest.end_status != "COMPLETED":
+            raise RuntimeError("Final smoke manifest is not complete")
         return SmokeResult(
             run_id=resolved_run_id,
             run_directory=run_directory,
@@ -275,43 +585,122 @@ def run_smoke(config: ResolvedSmokeConfig, *, run_id: str | None = None) -> Smok
             toy_output=toy_output,
         )
     except Exception as exc:
-        elapsed_seconds = time.perf_counter() - start_tick
-        peak_memory = tracemalloc.get_traced_memory()[1] if tracemalloc.is_tracing() else 0
-        if tracemalloc.is_tracing():
-            tracemalloc.stop()
-        logger.exception(
-            "Milestone 0 smoke run failed",
-            extra={"event": "smoke_failed", "run_id": resolved_run_id},
-        )
-        close_logging(logger)
         reason = f"{type(exc).__name__}: {exc}"
-        budget = budget.model_copy(
-            update={
-                "forward_passes": forward_passes,
-                "elapsed_compute_seconds": elapsed_seconds,
-                "peak_memory_bytes": peak_memory,
-            }
-        )
-        stable_paths = [resolved_path, gate_path, toy_path, log_path]
-        budget = _write_budget_with_stable_size(budget_path, budget, stable_paths)
-        artifact_paths = [path for path in [*stable_paths, budget_path] if path.is_file()]
-        failed_manifest = _manifest(
-            config=config,
-            run_id=resolved_run_id,
-            started_at=started_at,
-            ended_at=utc_now(),
-            end_status="FAILED",
-            failure_reason=reason,
-            budget=budget,
-            gate_metadata=gate_metadata,
-            artifacts=_relative_artifacts(run_directory, artifact_paths),
-        )
-        write_json(manifest_path, failed_manifest)
-        raise SmokeRunError(reason, run_directory, manifest_path) from exc
+        recording_errors: list[str] = []
+        if not run_declared_started and failure_stage == "initial_manifest_write":
+            try:
+                interrupted_manifest = RunManifest.model_validate_json(
+                    manifest_path.read_text(encoding="utf-8")
+                )
+                run_declared_started = interrupted_manifest.end_status == "RUNNING"
+            except Exception as status_error:
+                recording_errors.append(
+                    "interrupted initial manifest validation: "
+                    f"{type(status_error).__name__}: {status_error}"
+                )
+        try:
+            budget = _snapshot_budget(
+                budget,
+                start_tick=start_tick,
+                forward_passes=forward_passes,
+            )
+        except Exception as accounting_error:
+            recording_errors.append(
+                "failure resource accounting: "
+                f"{type(accounting_error).__name__}: {accounting_error}"
+            )
+        if logger is not None:
+            try:
+                logger.error(
+                    "Milestone 0 smoke run failed",
+                    extra={"event": "smoke_failed", "run_id": resolved_run_id},
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
+            except Exception as logging_error:
+                recording_errors.append(
+                    f"failure log writing: {type(logging_error).__name__}: {logging_error}"
+                )
+        _close_logging_best_effort(logger, recording_errors)
+
+        failure_artifact_path: Path | None = None
+        failure_artifact_kind: FailureArtifactKind | None = None
+        if run_declared_started:
+            try:
+                failure_artifact_path = _record_full_failure(
+                    config=config,
+                    run_id=resolved_run_id,
+                    run_directory=run_directory,
+                    git=git,
+                    package_versions=package_versions,
+                    platform=platform,
+                    started_at=started_at,
+                    reason=reason,
+                    budget=budget,
+                    gate_metadata=gate_metadata,
+                    resolved_path=resolved_path,
+                    gate_path=gate_path,
+                    budget_path=budget_path,
+                    toy_path=toy_path,
+                    log_path=log_path,
+                    manifest_path=manifest_path,
+                    recording_errors=recording_errors,
+                )
+                failure_artifact_kind = "failure_manifest"
+            except Exception as recording_error:
+                recording_errors.append(
+                    "failure manifest recording: "
+                    f"{type(recording_error).__name__}: {recording_error}"
+                )
+
+        if failure_artifact_path is None:
+            try:
+                failure_artifact_path = _record_bootstrap_failure(
+                    config=config,
+                    run_id=resolved_run_id,
+                    run_directory=run_directory,
+                    git=git,
+                    package_versions=package_versions,
+                    platform=platform,
+                    run_declared_started=run_declared_started,
+                    failure_stage=failure_stage,
+                    original_exception=exc,
+                    reason=reason,
+                    budget=budget,
+                    gate_metadata=gate_metadata,
+                    resolved_path=resolved_path,
+                    gate_path=gate_path,
+                    budget_path=budget_path,
+                    toy_path=toy_path,
+                    log_path=log_path,
+                    manifest_path=manifest_path,
+                    bootstrap_path=bootstrap_path,
+                    recording_errors=recording_errors,
+                )
+            except Exception as recording_error:
+                recording_errors.append(
+                    "bootstrap failure recording: "
+                    f"{type(recording_error).__name__}: {recording_error}"
+                )
+            if failure_artifact_path is not None:
+                failure_artifact_kind = "bootstrap_failure"
+
+        raise SmokeRunError(
+            reason,
+            run_directory,
+            failure_artifact_path,
+            failure_artifact_kind,
+            tuple(recording_errors),
+        ) from exc
     finally:
-        if tracemalloc.is_tracing():
-            tracemalloc.stop()
-        if tracing_was_active:
-            tracemalloc.start()
-        if logger.handlers:
-            close_logging(logger)
+        try:
+            if tracing_started_here and tracemalloc.is_tracing():
+                tracemalloc.stop()
+            if tracing_was_active and not tracemalloc.is_tracing():
+                tracemalloc.start()
+        except Exception:
+            # Process-global tracing cleanup must not replace the original run outcome.
+            pass
+        if logger is not None and logger.handlers:
+            # Cleanup is intentionally non-raising so it cannot replace the original run outcome.
+            with suppress(Exception):
+                close_logging(logger)

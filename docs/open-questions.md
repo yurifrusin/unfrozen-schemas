@@ -1,6 +1,6 @@
 # Open questions
 
-Only decisions not settled by `CODEX_SPEC_Unfrozen_Schemas_v4.md` belong here.
+Only decisions not settled by `CODEX_SPEC.md` belong here.
 
 1. **Repository licence:** Which software licence should govern the source, and should research
    artifacts or benchmark materials use separate terms?

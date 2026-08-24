@@ -1,7 +1,7 @@
 # Scientific design
 
 This document is an operational summary of
-`CODEX_SPEC_Unfrozen_Schemas_v4.md`. The specification remains authoritative.
+`CODEX_SPEC.md`. The specification remains authoritative.
 
 ## Programme structure
 

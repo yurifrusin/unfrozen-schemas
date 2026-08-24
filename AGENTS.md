@@ -4,9 +4,9 @@ These rules apply to every change in this repository.
 
 ## Required reading and scope
 
-- Read `CODEX_SPEC_Unfrozen_Schemas_v4.md`, `docs/scientific-design.md`, and
+- Read `CODEX_SPEC.md`, `docs/scientific-design.md`, and
   `docs/implementation-plan.md` in full before changing implementation code.
-- Treat `CODEX_SPEC_Unfrozen_Schemas_v4.md` as the authoritative Revision 4 specification.
+- Treat `CODEX_SPEC.md` as the authoritative Revision 4 specification.
 - Implement one milestone at a time. Do not begin a later milestone until the current milestone's
   tests and acceptance criteria pass and the work has been reviewed.
 - Write or update tests before declaring a milestone complete.

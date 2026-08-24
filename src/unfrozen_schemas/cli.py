@@ -9,6 +9,7 @@ import typer
 from pydantic import ValidationError
 
 from unfrozen_schemas.config import ConfigLoadError, load_smoke_config
+from unfrozen_schemas.provenance import BootstrapFailureRecord, RunManifest
 from unfrozen_schemas.smoke import SmokeRunError, run_smoke
 
 app = typer.Typer(
@@ -95,8 +96,42 @@ def smoke(
     try:
         result = run_smoke(resolved)
     except SmokeRunError as exc:
+        typer.echo(f"Smoke failure reason: {exc}", err=True)
+        artifact_path = exc.failure_artifact_path
+        artifact_kind = exc.failure_artifact_kind
+        artifact_valid = False
+        if artifact_path is not None and artifact_path.is_file():
+            try:
+                if artifact_kind == "failure_manifest":
+                    RunManifest.model_validate_json(artifact_path.read_text(encoding="utf-8"))
+                    artifact_valid = True
+                elif artifact_kind == "bootstrap_failure":
+                    BootstrapFailureRecord.model_validate_json(
+                        artifact_path.read_text(encoding="utf-8")
+                    )
+                    artifact_valid = True
+            except Exception:
+                artifact_valid = False
+        if artifact_valid:
+            if artifact_kind == "failure_manifest":
+                typer.echo(
+                    f"Smoke run failed; validated failure manifest: {artifact_path}", err=True
+                )
+            else:
+                typer.echo(
+                    f"Smoke bootstrap failed; validated bootstrap failure record: {artifact_path}",
+                    err=True,
+                )
+        else:
+            typer.echo(
+                "Smoke run failed; no validated failure artifact could be written. "
+                f"Run directory: {exc.run_directory}",
+                err=True,
+            )
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
         typer.echo(
-            f"Smoke run failed; complete failure manifest: {exc.manifest_path}",
+            f"Smoke preflight failed before run creation: {type(exc).__name__}: {exc}",
             err=True,
         )
         raise typer.Exit(code=1) from exc

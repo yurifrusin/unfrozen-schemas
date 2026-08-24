@@ -2,25 +2,39 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
-from unfrozen_schemas.config import load_smoke_config
+import unfrozen_schemas.smoke as smoke_module
+from unfrozen_schemas.config import ResolvedSmokeConfig, load_smoke_config
 from unfrozen_schemas.constants import (
+    BOOTSTRAP_FAILURE_FILENAME,
     BUDGET_FILENAME,
     GATE_METADATA_FILENAME,
     MANIFEST_FILENAME,
     RESOLVED_CONFIG_FILENAME,
 )
-from unfrozen_schemas.provenance import RunManifest
+from unfrozen_schemas.provenance import (
+    ArtifactRecord,
+    BootstrapFailureRecord,
+    GitState,
+    RunManifest,
+    write_json,
+)
 from unfrozen_schemas.smoke import SmokeRunError, run_smoke
 
 
-def test_failed_smoke_run_records_complete_failure_manifest(tmp_path: Path) -> None:
-    resolved = load_smoke_config(
-        Path("configs/experiment/smoke.yaml"), output_root_override=tmp_path
-    )
+def _resolved_config(tmp_path: Path) -> ResolvedSmokeConfig:
+    return load_smoke_config(Path("configs/experiment/smoke.yaml"), output_root_override=tmp_path)
+
+
+def test_failed_started_smoke_run_records_complete_failure_manifest(tmp_path: Path) -> None:
+    resolved = _resolved_config(tmp_path)
     missing_model = resolved.model.model_copy(update={"fixture_path": tmp_path / "missing.json"})
     failing_config = resolved.model_copy(update={"model": missing_model})
 
@@ -31,6 +45,8 @@ def test_failed_smoke_run_records_complete_failure_manifest(tmp_path: Path) -> N
     manifest_path = run_directory / MANIFEST_FILENAME
     manifest = RunManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
 
+    assert captured.value.failure_artifact_kind == "failure_manifest"
+    assert captured.value.failure_artifact_path == manifest_path
     assert captured.value.manifest_path == manifest_path
     assert manifest.start_status == "STARTED"
     assert manifest.end_status == "FAILED"
@@ -41,3 +57,131 @@ def test_failed_smoke_run_records_complete_failure_manifest(tmp_path: Path) -> N
     assert (run_directory / RESOLVED_CONFIG_FILENAME).is_file()
     assert (run_directory / BUDGET_FILENAME).is_file()
     assert (run_directory / GATE_METADATA_FILENAME).is_file()
+
+
+def test_one_shot_initial_artifact_write_failure_records_bootstrap_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resolved = _resolved_config(tmp_path)
+    failure_injected = False
+
+    def fail_first_resolved_write(path: Path, value: BaseModel | Mapping[str, Any]) -> None:
+        nonlocal failure_injected
+        if path.name == RESOLVED_CONFIG_FILENAME and not failure_injected:
+            failure_injected = True
+            raise OSError("one-shot initial artifact failure")
+        write_json(path, value)
+
+    monkeypatch.setattr(smoke_module, "write_json", fail_first_resolved_write)
+
+    with pytest.raises(SmokeRunError) as captured:
+        run_smoke(resolved, run_id="initial-artifact-failure-test")
+
+    error = captured.value
+    bootstrap_path = error.run_directory / BOOTSTRAP_FAILURE_FILENAME
+    record = BootstrapFailureRecord.model_validate_json(bootstrap_path.read_text(encoding="utf-8"))
+
+    assert failure_injected is True
+    assert error.failure_artifact_kind == "bootstrap_failure"
+    assert error.failure_artifact_path == bootstrap_path
+    assert error.manifest_path is None
+    assert record.run_declared_started is False
+    assert record.failure_stage == "initial_artifact_writes"
+    assert record.original_exception_type == "OSError"
+    assert "one-shot initial artifact failure" in record.original_failure_reason
+    assert record.resource_budget.elapsed_compute_seconds > 0
+    assert (error.run_directory / RESOLVED_CONFIG_FILENAME).is_file()
+    assert (error.run_directory / GATE_METADATA_FILENAME).is_file()
+    assert (error.run_directory / BUDGET_FILENAME).is_file()
+
+
+def test_logging_setup_failure_records_valid_bootstrap_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resolved = _resolved_config(tmp_path)
+
+    def fail_logging_setup(_path: Path, _level: str) -> logging.Logger:
+        raise PermissionError("logging bootstrap denied")
+
+    monkeypatch.setattr(smoke_module, "configure_logging", fail_logging_setup)
+
+    with pytest.raises(SmokeRunError) as captured:
+        run_smoke(resolved, run_id="logging-bootstrap-failure-test")
+
+    error = captured.value
+    assert error.failure_artifact_kind == "bootstrap_failure"
+    assert error.failure_artifact_path is not None
+    record = BootstrapFailureRecord.model_validate_json(
+        error.failure_artifact_path.read_text(encoding="utf-8")
+    )
+    assert record.failure_stage == "logging_setup"
+    assert record.run_declared_started is False
+    assert record.original_exception_type == "PermissionError"
+    assert record.original_failure_reason == "PermissionError: logging bootstrap denied"
+
+
+def test_initial_manifest_construction_failure_records_bootstrap_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resolved = _resolved_config(tmp_path)
+
+    def fail_initial_artifact_accounting(
+        _run_directory: Path, _paths: list[Path]
+    ) -> list[ArtifactRecord]:
+        raise RuntimeError("initial manifest construction sentinel")
+
+    monkeypatch.setattr(smoke_module, "_relative_artifacts", fail_initial_artifact_accounting)
+
+    with pytest.raises(SmokeRunError) as captured:
+        run_smoke(resolved, run_id="initial-manifest-failure-test")
+
+    error = captured.value
+    assert error.failure_artifact_kind == "bootstrap_failure"
+    assert error.failure_artifact_path is not None
+    record = BootstrapFailureRecord.model_validate_json(
+        error.failure_artifact_path.read_text(encoding="utf-8")
+    )
+    assert record.failure_stage == "initial_manifest_construction"
+    assert record.run_declared_started is False
+    assert "initial manifest construction sentinel" in record.original_failure_reason
+
+
+def test_provenance_preflight_failure_does_not_create_run_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resolved = _resolved_config(tmp_path)
+
+    def fail_git_preflight(_repository_root: Path) -> GitState:
+        raise RuntimeError("provenance preflight sentinel")
+
+    monkeypatch.setattr("unfrozen_schemas.smoke.capture_git_state", fail_git_preflight)
+
+    with pytest.raises(RuntimeError, match="provenance preflight sentinel"):
+        run_smoke(resolved, run_id="preflight-failure-test")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_secondary_recording_failure_does_not_mask_original_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resolved = _resolved_config(tmp_path)
+
+    def fail_logging_setup(_path: Path, _level: str) -> logging.Logger:
+        raise PermissionError("original bootstrap reason")
+
+    def fail_bootstrap_record(**_kwargs: object) -> Path | None:
+        raise OSError("secondary recording failure")
+
+    monkeypatch.setattr(smoke_module, "configure_logging", fail_logging_setup)
+    monkeypatch.setattr(smoke_module, "_record_bootstrap_failure", fail_bootstrap_record)
+
+    with pytest.raises(SmokeRunError) as captured:
+        run_smoke(resolved, run_id="secondary-recording-failure-test")
+
+    error = captured.value
+    assert str(error) == "PermissionError: original bootstrap reason"
+    assert isinstance(error.__cause__, PermissionError)
+    assert error.failure_artifact_path is None
+    assert error.failure_artifact_kind is None
+    assert any("secondary recording failure" in item for item in error.recording_errors)

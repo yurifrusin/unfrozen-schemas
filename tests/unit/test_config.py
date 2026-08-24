@@ -20,7 +20,7 @@ def _write_fake_repository(tmp_path: Path, *, expected_hash: str | None = None) 
     (repository / "configs/experiment").mkdir(parents=True)
     (repository / "configs/model").mkdir(parents=True)
     (repository / "tests/fixtures").mkdir(parents=True)
-    (repository / "CODEX_SPEC_Unfrozen_Schemas_v4.md").write_text("test spec\n", encoding="utf-8")
+    (repository / "CODEX_SPEC.md").write_text("test spec\n", encoding="utf-8")
 
     fixture_data: dict[str, Any] = {
         "schema_version": "1",

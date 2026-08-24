@@ -2,7 +2,7 @@
 
 Unfrozen Schemas is a reproducible research-software platform for testing whether direct causal
 experience and language scaffolding complement one another in image-schematic transfer. Revision 4
-of the authoritative architecture is in `CODEX_SPEC_Unfrozen_Schemas_v4.md`.
+of the authoritative architecture is in `CODEX_SPEC.md`.
 
 This branch implements **Milestone 0 only**: governance, packaging, validated configuration,
 structured local logging, provenance and resource accounting, an offline CPU smoke command, tests,

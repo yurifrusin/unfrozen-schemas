@@ -118,6 +118,32 @@ class RunManifest(FrozenRecord):
         return self
 
 
+class BootstrapFailureRecord(FrozenRecord):
+    """Failure provenance when a complete terminal run manifest cannot be guaranteed."""
+
+    schema_version: Literal["1"] = "1"
+    record_kind: Literal["milestone_0_bootstrap_failure"] = "milestone_0_bootstrap_failure"
+    run_id: str
+    scientific_phase: Literal[0] = 0
+    engineering_only: Literal[True] = True
+    scientific_result: Literal[False] = False
+    run_declared_started: bool
+    failure_stage: str = Field(min_length=1)
+    original_exception_type: str = Field(min_length=1)
+    original_failure_reason: str = Field(min_length=1)
+    recorded_at: datetime
+    git: GitState
+    resolved_configuration: ResolvedSmokeConfig
+    package_versions: dict[str, str]
+    platform: PlatformInformation
+    declared_random_seed: int
+    resource_budget: ResourceBudget
+    artifacts: list[ArtifactRecord]
+    last_manifest_path: str | None
+    last_manifest_status: Literal["RUNNING", "COMPLETED", "FAILED"] | None
+    recording_errors: list[str]
+
+
 def utc_now() -> datetime:
     """Return an aware UTC timestamp."""
 
