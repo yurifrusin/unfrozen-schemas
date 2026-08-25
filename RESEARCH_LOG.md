@@ -58,6 +58,12 @@ Because later claims depend on exact checkpoints, benchmarks, configurations, co
 
 This discipline is intended to preserve null, text-dominant, and compartmentalised outcomes just as carefully as preferred positive results.
 
+## 2026-08-25 — Milestone 0 closes without a scientific result
+
+Milestone 0 established the governed software, provenance, resource-accounting, testing, and archival foundation needed for later experiments. Its closeout does not report evidence for image-schema learning and does not constitute a Phase I gate result.
+
+The specification and scientific design were not changed during closeout. Milestone 1 becomes authorised only after the reviewed closeout record is merged and the immutable `milestone-0-complete` tag and GitHub Release are published from canonical `main`; no Milestone 1 implementation is part of this event.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>

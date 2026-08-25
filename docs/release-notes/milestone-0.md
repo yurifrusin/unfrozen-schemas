@@ -1,15 +1,16 @@
 # Milestone 0 Release — Repository Foundation
 
-> Draft only. Finalise after the pull request is approved and merged. Do not describe Milestone 0 as complete until the tag and GitHub Release exist.
+> Canonical closeout record. Milestone 0 is complete only while the annotated tag and GitHub Release identified below remain visible at the canonical closeout commit.
 
 ## Identity
 
-- Tag: `<fill after canonical closeout>`
-- Canonical merged commit: `<fill after merge>`
-- Pull request: `https://github.com/yurifrusin/unfrozen-schemas/pull/1`
-- Release date: `<fill after release>`
-- Release URL: `<fill after release>`
-- Revision 6 `CODEX_SPEC.md` SHA-256: `<fill from the approved head>`
+- Tag: `milestone-0-complete`
+- Canonical implementation merge commit: `98e4a932cff37351efcf6873702aeb5c904fe53e`
+- Implementation pull request: `https://github.com/yurifrusin/unfrozen-schemas/pull/1`
+- Linked closeout pull request: `<fill from the mechanically constrained closeout pull request>`
+- Release date: `2026-08-25`
+- Release URL: `https://github.com/yurifrusin/unfrozen-schemas/releases/tag/milestone-0-complete`
+- Revision 6 `CODEX_SPEC.md` SHA-256: `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`
 
 ## Scope completed
 
@@ -35,14 +36,14 @@
 
 ## Verification
 
-- Final CI workflow/run: `<fill after canonical closeout>`
-- `uv sync --locked`: passed locally; 28 packages resolved and 27 checked
+- Final implementation CI workflow/run: `cpu` passed at `https://github.com/yurifrusin/unfrozen-schemas/actions/runs/32783255504/job/97609688068`
+- `uv sync --locked`: passed locally with `uv 0.12.5`; 28 packages resolved
 - Ruff lint: passed locally
 - Ruff formatting: passed locally; 26 files already formatted
 - strict mypy: passed locally; 12 source files checked
-- pytest: `<refresh after review-correction verification>`
-- offline smoke: passed locally; run `milestone-0-smoke-20260824T134648910348Z-984b6be49b`
-- merged tree clean and equal to `origin/main`: pending merge and post-merge closeout
+- pytest: passed locally; 31 tests passed
+- offline smoke: passed locally; run `milestone-0-smoke-20260825T034715219278Z-1cccce044e`
+- merged implementation tree: clean and equal to `origin/main` at `98e4a932cff37351efcf6873702aeb5c904fe53e` before the linked closeout record
 
 ## Scientific invariants checked
 
@@ -62,6 +63,6 @@
 
 ## Advancement decision
 
-- Status: `<fill after canonical closeout>`
-- Next authorised work: `<fill after canonical closeout>`
-- Owner/reviewer: `<fill after review>`
+- Status: `COMPLETE` when the declared annotated tag and GitHub Release are published from the merged linked-closeout commit
+- Next authorised work: Milestone 1 — SchemaWorld Core, only after this closeout is published; Milestone 1 is not begun by this release
+- Owner/reviewer: Yuri Frusin; approval recorded for pull request `#1` at exact head `b48ea734e41595ef1d071e52ee8a943c503ded44`
