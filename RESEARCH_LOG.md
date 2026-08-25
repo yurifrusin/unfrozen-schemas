@@ -115,6 +115,24 @@ After the linked documentation closeout is merged and `milestone-1-complete` is 
 from canonical `main`, governance authorises Milestone 2 as the next engineering milestone. That
 authorisation does not begin Milestone 2, and no Milestone 2 work occurred during this closeout.
 
+### 2026-08-25 — Benchmark identity, visibility, answers, and hash domains are separated
+
+M2.1 treats lifecycle state independently from release visibility: SOURCE authoring, PRIVATE
+candidate, and FROZEN write-once status do not imply that prompts, answers, or metadata are public.
+Answers remain in a distinct private artifact, while public output is aggregate metadata scanned
+recursively against private values.
+
+Outcome, selection, engineering, and prospective retention purposes are bound into item identity,
+logical hashes, manifests, and approvals. An item cannot change purpose in place, and cross-purpose
+validation compares both stable IDs and equivalent model-visible content. This keeps model-selection
+material and software fixtures from becoming outcome evidence.
+
+Scientific logical hashes are calculated from typed canonical records with explicit domains and are
+separate from exact file/container hashes. This preserves identity across path, timestamp, JSON-key,
+line-ending, and filesystem-order differences while retaining ordinary artifact hashes for byte-level
+provenance. These are prospective integrity decisions, not benchmark-content or scientific-result
+decisions; all open content, validation, ethics, licensing, stack, and archive questions remain open.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>

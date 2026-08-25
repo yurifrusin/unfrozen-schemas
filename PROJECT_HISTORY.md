@@ -131,6 +131,21 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
   this closeout; Milestone 2 was not begun. No benchmark, LLM, tokenizer, training, or GPU work
   occurred during closeout.
 
+### 2026-08-25 — Milestone 2 M2.1 branch start
+
+- Canonical branch point: `73a787b3f0c25b78962ac13fb3b26c1cc50f0dae`, equal to local
+  `main`, `origin/main`, and the target of annotated `milestone-1-complete` at preflight.
+- Branch: `codex/milestone-2-m2-1-benchmark-lifecycle`.
+- Prior tag object: `21a5e615553cf63ddb1da91000889bb8ee657a21`.
+- Revision 6 `CODEX_SPEC.md` SHA-256:
+  `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`.
+- Active main ruleset: `21295385`, requiring pull requests, resolved conversations, and strict
+  required `cpu`; deletion and non-fast-forward updates remain prohibited.
+- Work is limited to M2.1 benchmark schema/lifecycle mechanics and one non-scientific engineering
+  fixture. No M2.2-M2.6 content, model, GPU, selection probe, or production freeze is part of it.
+- Status: implementation work in progress; no merge, tag, release, benchmark freeze, or Milestone 2
+  completion has occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>
