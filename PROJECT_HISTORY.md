@@ -94,6 +94,43 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Status: the correction remains on the open implementation pull request and is not merged, tagged,
   released, scientifically frozen, or a completed milestone.
 
+### Milestone 1 canonical implementation merge and closeout
+
+- Milestone 1 began from canonical branch point
+  `a1712c7d6229fd90c5619414fc13fa1a21a4cd22`, the target of `milestone-0-complete`.
+- Owner approval identified implementation pull request `#3` and exact head
+  `e6e6d81128ff619679539ba99cb8545adbd84e8e`.
+- Pull request `https://github.com/yurifrusin/unfrozen-schemas/pull/3` was revalidated as open,
+  non-draft, mergeable into `main`, with zero review threads or findings and its required `cpu`
+  check passing in workflow run `32831001607` on the exact approved head.
+- The implementation was merged normally, without squash, rebase, rewrite, or administrator bypass,
+  at `2026-08-25T11:35:12Z`. The canonical implementation merge commit is
+  `cff2840db09dd0dcf3a37b7c42b58aac9cf5e105`.
+- Push-triggered canonical-main workflow run `32843080885` passed job `cpu` on that merge commit.
+- Local `main` was fast-forwarded to the canonical implementation merge and verified clean, equal to
+  `origin/main`, and unchanged at Revision 6 `CODEX_SPEC.md` SHA-256
+  `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`.
+- The linked documentation-only closeout branch is `codex/milestone-1-closeout`, created from exact
+  branch point `cff2840db09dd0dcf3a37b7c42b58aac9cf5e105`; linked closeout pull request:
+  `https://github.com/yurifrusin/unfrozen-schemas/pull/4`.
+- Final Windows verification passed Ruff lint and formatting, strict mypy over 40 source/test files,
+  all 161 pytest tests on Python 3.11.7, Milestone 0 offline smoke, 12-episode/6-pair Core
+  generation, independent source validation, complete replay, independent replay validation, and
+  representative tension rendering. All five pinned regression identities remained unchanged.
+- The released environment identity is `schemaworld-core-v1`, with integer scientific state,
+  `splitmix64-v1`, `opaque-byte-v1`, and `schemaworld-raster-v1`. Direct M1 dependencies are
+  PyArrow `25.0.1` (Apache-2.0) and Pillow `12.3.0` (MIT-CMU).
+- The effective active `main` ruleset remained `21295385`: pull request required, strict/up-to-date
+  `cpu` required, conversations resolved, deletion and non-fast-forward updates prohibited, and zero
+  approving reviews required. The administrator bypass was not used.
+- Completion depends on merging the linked closeout PR and publishing the immutable annotated
+  `milestone-1-complete` tag and GitHub Release from its canonical merge commit.
+- Milestone 1 is deterministic experimental apparatus only and makes no empirical claim about LLM
+  image-schema acquisition. Repository and documentation licensing remain unresolved.
+- Advancement decision: Milestone 2 is the next authorised work only after complete publication of
+  this closeout; Milestone 2 was not begun. No benchmark, LLM, tokenizer, training, or GPU work
+  occurred during closeout.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>
