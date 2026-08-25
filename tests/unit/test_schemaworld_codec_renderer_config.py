@@ -11,6 +11,7 @@ import unfrozen_schemas.core_config as core_config_module
 from unfrozen_schemas.codecs.opaque_tokens import OpaqueDiscreteCodec
 from unfrozen_schemas.config import ConfigLoadError
 from unfrozen_schemas.core_config import load_core_config
+from unfrozen_schemas.envs.schema_world.relation_kinds import RelationKind
 from unfrozen_schemas.envs.schema_world.renderer import render_raw_pixels, save_png
 from unfrozen_schemas.envs.schema_world.serialization import (
     FORBIDDEN_RELATION_LABELS,
@@ -46,6 +47,20 @@ def test_codec_is_identical_for_equal_records_across_matched_conditions() -> Non
         primary_observation(pair.episodes[1].initial_state), record_kind="observation"
     )
     assert left == right
+
+
+@pytest.mark.parametrize("relation", list(RelationKind))
+def test_every_privileged_relation_name_is_rejected_from_opaque_streams(
+    relation: RelationKind,
+) -> None:
+    plan = generate_matched_pair(
+        TemplateFamily.CONTAINMENT_GATE, seed=101, noise_seed=100_101
+    ).episodes[0]
+    codec = OpaqueDiscreteCodec()
+    encoded = codec.encode(primary_observation(plan.initial_state), record_kind="observation")
+    tampered = encoded.model_copy(update={"symbols": (relation.value,)})
+    with pytest.raises(ValueError, match="Opaque symbols"):
+        codec.assert_semantically_opaque(tampered)
 
 
 def test_renderer_is_headless_deterministic_and_hashes_raw_pixels(tmp_path: Path) -> None:

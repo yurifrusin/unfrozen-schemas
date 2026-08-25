@@ -68,6 +68,19 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Status: Milestone 1 implementation is in progress and is not a completed, merged, tagged, or
   released milestone.
 
+### Milestone 1 pre-release causal-contract correction
+
+- Continued on `codex/milestone-1-schemaworld-core` and pull request
+  `https://github.com/yurifrusin/unfrozen-schemas/pull/3` from pre-correction head
+  `34735ae73515cd6271d7b0c5e546b440bf82971d`.
+- Tightened the unreleased SchemaWorld Core contract for exact taut tether support, swept containment
+  crossings, canonical per-kind action parameters, complete pair identities, independent persisted
+  trajectory verification, state-graph references, explicit observation codes, and relation leakage.
+- The environment remains `schemaworld-core-v1` because no Milestone 1 compatibility promise or
+  scientific artifact has been released.
+- Status: correction work remains on the open implementation pull request and is not merged, tagged,
+  released, scientifically frozen, or a completed milestone.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

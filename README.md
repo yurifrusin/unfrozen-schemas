@@ -54,6 +54,11 @@ The M1 path is CPU-only, offline, and engineering-only. Its exact operational co
 licences, serialization boundaries, and hashing rules are documented in `docs/schemaworld-core.md`.
 Generated runs remain under ignored output storage and are not scientific LLM results.
 
+The unreleased `schemaworld-core-v1` contract fails closed on slack or overlength active
+load-bearing tethers, diagonal movement, swept closed-boundary tunnelling, non-canonical action
+parameters, incomplete pair identities, invalid state-graph references, relation-vocabulary leakage,
+and any independently recomputed step, artifact, budget, configuration, or replay mismatch.
+
 The Milestone 0 smoke path is CPU-only, secret-free, download-free, and offline at execution time.
 
 ## Canonical GitHub workflow

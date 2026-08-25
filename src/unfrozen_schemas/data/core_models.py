@@ -88,8 +88,13 @@ class CoreRunManifest(FrozenModel):
             raise ValueError("Core manifest and budget must end together")
         if tuple(sorted(self.pair_ids)) != self.pair_ids:
             raise ValueError("Core pair_ids must use canonical ordering")
+        if len(self.pair_ids) != len(set(self.pair_ids)):
+            raise ValueError("Core pair_ids must be unique")
         if tuple(sorted(self.episodes, key=lambda item: item.episode_id)) != self.episodes:
             raise ValueError("Core episode digests must use canonical episode_id ordering")
+        episode_ids = tuple(item.episode_id for item in self.episodes)
+        if len(episode_ids) != len(set(episode_ids)):
+            raise ValueError("Core episode digests must use unique episode IDs")
         return self
 
 
@@ -97,7 +102,22 @@ class ReplayReport(FrozenModel):
     schema_version: Literal["1"] = "1"
     source_manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     matched_episode_ids: tuple[str, ...]
+    source_episode_digests: tuple[CoreEpisodeDigest, ...]
+    replayed_episode_digests: tuple[CoreEpisodeDigest, ...]
     all_hashes_match: Literal[True] = True
+
+    @model_validator(mode="after")
+    def validate_complete_replay(self) -> ReplayReport:
+        if tuple(sorted(self.matched_episode_ids)) != self.matched_episode_ids:
+            raise ValueError("Replay matched_episode_ids must use canonical ordering")
+        if len(self.matched_episode_ids) != len(set(self.matched_episode_ids)):
+            raise ValueError("Replay matched_episode_ids must be unique")
+        if self.source_episode_digests != self.replayed_episode_digests:
+            raise ValueError("Replay source and replayed episode digests must match exactly")
+        digest_ids = tuple(item.episode_id for item in self.replayed_episode_digests)
+        if digest_ids != self.matched_episode_ids:
+            raise ValueError("Replay episode digest IDs must equal matched_episode_ids")
+        return self
 
 
 class CoreRunResult(FrozenModel):

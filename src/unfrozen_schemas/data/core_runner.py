@@ -7,8 +7,10 @@ import time
 import tracemalloc
 from collections import defaultdict
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Literal, cast
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any, Literal, TypeVar, cast
+
+from pydantic import BaseModel, TypeAdapter
 
 from unfrozen_schemas.budgets import (
     RESOURCE_FIELDS,
@@ -32,10 +34,12 @@ from unfrozen_schemas.data.core_persistence import (
     write_episode_table,
     write_step_table,
 )
-from unfrozen_schemas.envs.schema_world.dynamics import transition
-from unfrozen_schemas.envs.schema_world.relations import derive_relations
+from unfrozen_schemas.envs.schema_world.actions import Action
+from unfrozen_schemas.envs.schema_world.dynamics import TransitionTrace, transition
+from unfrozen_schemas.envs.schema_world.relations import RelationRecord, derive_relations
 from unfrozen_schemas.envs.schema_world.renderer import render_raw_pixels, save_png
 from unfrozen_schemas.envs.schema_world.serialization import (
+    PrimaryObservation,
     assert_relation_labels_absent,
     canonical_hash,
     canonical_record_bytes,
@@ -65,6 +69,9 @@ CORE_STEPS_FILENAME = "steps.parquet"
 CORE_BUDGET_FILENAME = "resource_budget.json"
 CORE_RESOLVED_CONFIG_FILENAME = "resolved_core_config.json"
 CORE_REPLAY_REPORT_FILENAME = "replay_report.json"
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
+_RELATION_RECORDS = TypeAdapter(tuple[RelationRecord, ...])
 
 
 class _Counters:
@@ -195,6 +202,144 @@ def _artifact_records(run_directory: Path, paths: list[Path]) -> tuple[ArtifactR
 
 def _json_value(value: bytes) -> Any:
     return json.loads(value.decode("utf-8"))
+
+
+def _parse_canonical_model(model_type: type[_ModelT], payload: bytes, *, context: str) -> _ModelT:
+    try:
+        value = model_type.model_validate_json(payload)
+    except Exception as exc:
+        raise ValueError(f"Invalid typed {context}: {exc}") from exc
+    if canonical_record_bytes(value) != payload:
+        raise ValueError(f"Non-canonical JSON bytes for {context}")
+    return value
+
+
+def _parse_canonical_relations(payload: bytes, *, context: str) -> tuple[RelationRecord, ...]:
+    try:
+        value = _RELATION_RECORDS.validate_json(payload)
+    except Exception as exc:
+        raise ValueError(f"Invalid typed {context}: {exc}") from exc
+    if canonical_record_bytes(value) != payload:
+        raise ValueError(f"Non-canonical JSON bytes for {context}")
+    return value
+
+
+def _resolve_run_relative_path(run_directory: Path, declared: str, *, context: str) -> Path:
+    if not declared or "\\" in declared:
+        raise ValueError(f"{context} must be a canonical non-empty POSIX relative path")
+    posix = PurePosixPath(declared)
+    windows = PureWindowsPath(declared)
+    if posix.is_absolute() or windows.is_absolute() or windows.drive:
+        raise ValueError(f"{context} must not be absolute: {declared}")
+    if posix.as_posix() != declared:
+        raise ValueError(f"{context} is not a canonical POSIX relative path: {declared}")
+    if any(part in {"", ".", ".."} for part in posix.parts):
+        raise ValueError(f"{context} contains prohibited path traversal: {declared}")
+    resolved_run = run_directory.resolve()
+    resolved = (resolved_run / Path(*posix.parts)).resolve()
+    if not resolved.is_relative_to(resolved_run):
+        raise ValueError(f"{context} resolves outside the run directory: {declared}")
+    return resolved
+
+
+def _validate_manifest_artifacts(manifest_path: Path, manifest: CoreRunManifest) -> dict[str, Path]:
+    run_directory = manifest_path.parent
+    declared_paths = [record.path for record in manifest.artifacts]
+    if len(declared_paths) != len(set(declared_paths)):
+        raise ValueError("Manifest contains duplicate artifact paths")
+
+    named_paths: dict[str, str] = {"budget_path": manifest.budget_path}
+    if manifest.episodes_path is not None:
+        named_paths["episodes_path"] = manifest.episodes_path
+    if manifest.steps_path is not None:
+        named_paths["steps_path"] = manifest.steps_path
+    if manifest.replay_report_path is not None:
+        named_paths["replay_report_path"] = manifest.replay_report_path
+    for name, value in named_paths.items():
+        _resolve_run_relative_path(run_directory, value, context=name)
+
+    resolved: dict[str, Path] = {}
+    for record in manifest.artifacts:
+        artifact = _resolve_run_relative_path(
+            run_directory, record.path, context="manifest artifact path"
+        )
+        if not artifact.is_file():
+            raise ValueError(f"Manifest artifact is missing: {record.path}")
+        if artifact.stat().st_size != record.size_bytes or sha256_file(artifact) != record.sha256:
+            raise ValueError(f"Manifest artifact identity mismatch: {record.path}")
+        resolved[record.path] = artifact
+
+    if manifest.status == "COMPLETED":
+        if manifest.run_kind == "generate_core":
+            expected_named = {
+                "episodes_path": CORE_EPISODES_FILENAME,
+                "steps_path": CORE_STEPS_FILENAME,
+                "budget_path": CORE_BUDGET_FILENAME,
+            }
+            expected_artifacts = {
+                CORE_RESOLVED_CONFIG_FILENAME,
+                CORE_EPISODES_FILENAME,
+                CORE_STEPS_FILENAME,
+                CORE_BUDGET_FILENAME,
+            }
+            if manifest.replay_report_path is not None:
+                raise ValueError("Completed generation manifest must not name a replay report")
+        else:
+            expected_named = {
+                "budget_path": CORE_BUDGET_FILENAME,
+                "replay_report_path": CORE_REPLAY_REPORT_FILENAME,
+            }
+            expected_artifacts = {
+                CORE_RESOLVED_CONFIG_FILENAME,
+                CORE_REPLAY_REPORT_FILENAME,
+                CORE_BUDGET_FILENAME,
+            }
+            if manifest.episodes_path is not None or manifest.steps_path is not None:
+                raise ValueError("Completed replay manifest must not name episode or step tables")
+        for name, expected in expected_named.items():
+            if getattr(manifest, name) != expected:
+                raise ValueError(f"Completed manifest {name} must equal {expected}")
+        if set(resolved) != expected_artifacts:
+            raise ValueError(
+                "Completed manifest mandatory artifact set mismatch: "
+                f"expected={sorted(expected_artifacts)}, observed={sorted(resolved)}"
+            )
+    return resolved
+
+
+def _validate_embedded_files(manifest: CoreRunManifest, artifacts: dict[str, Path]) -> None:
+    budget_path = artifacts.get(CORE_BUDGET_FILENAME)
+    if budget_path is None:
+        raise ValueError("Manifest is missing mandatory resource_budget.json artifact")
+    budget = _parse_canonical_model(
+        ResourceBudget,
+        budget_path.read_bytes(),
+        context=CORE_BUDGET_FILENAME,
+    )
+    if budget != manifest.resource_budget:
+        raise ValueError("resource_budget.json does not equal the embedded ResourceBudget")
+
+    config_path = artifacts.get(CORE_RESOLVED_CONFIG_FILENAME)
+    if manifest.status == "COMPLETED" and config_path is None:
+        raise ValueError("Manifest is missing mandatory resolved_core_config.json artifact")
+    if config_path is not None:
+        resolved = _parse_canonical_model(
+            ResolvedCoreConfig,
+            config_path.read_bytes(),
+            context=CORE_RESOLVED_CONFIG_FILENAME,
+        )
+        if resolved != manifest.resolved_configuration:
+            raise ValueError(
+                "resolved_core_config.json does not equal the embedded resolved configuration"
+            )
+
+
+def _validate_budget_artifact_totals(manifest: CoreRunManifest) -> None:
+    if manifest.resource_budget.stored_artifact_count != len(manifest.artifacts):
+        raise ValueError("ResourceBudget stored_artifact_count does not match manifest artifacts")
+    artifact_bytes = sum(record.size_bytes for record in manifest.artifacts)
+    if manifest.resource_budget.stored_artifact_bytes != artifact_bytes:
+        raise ValueError("ResourceBudget stored_artifact_bytes does not match manifest artifacts")
 
 
 def _trajectory_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -518,61 +663,233 @@ def _validate_generation_records(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     run_directory = manifest_path.parent
     assert manifest.episodes_path is not None and manifest.steps_path is not None
-    episode_rows = read_episode_table(run_directory / manifest.episodes_path)
-    step_rows = read_step_table(run_directory / manifest.steps_path)
+    episodes_path = _resolve_run_relative_path(
+        run_directory, manifest.episodes_path, context="episodes_path"
+    )
+    steps_path = _resolve_run_relative_path(
+        run_directory, manifest.steps_path, context="steps_path"
+    )
+    episode_rows = read_episode_table(episodes_path)
+    step_rows = read_step_table(steps_path)
+
+    episode_ids = [cast(str, row["episode_id"]) for row in episode_rows]
+    if len(episode_ids) != len(set(episode_ids)):
+        raise ValueError("Episode table contains duplicate episode IDs")
+    step_keys = [(cast(str, row["episode_id"]), cast(int, row["step_index"])) for row in step_rows]
+    if len(step_keys) != len(set(step_keys)):
+        raise ValueError("Step table contains duplicate episode/step keys")
+
     steps_by_episode: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in step_rows:
         steps_by_episode[cast(str, row["episode_id"])].append(row)
+    unexpected_step_episodes = set(steps_by_episode) - set(episode_ids)
+    if unexpected_step_episodes:
+        raise ValueError(
+            f"Step table references unexpected episode IDs: {sorted(unexpected_step_episodes)}"
+        )
+
     plans_by_pair: dict[str, list[EpisodePlan]] = defaultdict(list)
     observed_digests: list[CoreEpisodeDigest] = []
     codec = OpaqueDiscreteCodec()
     for row in episode_rows:
-        plan = EpisodePlan.model_validate_json(row["plan_json"])
+        episode_id = cast(str, row["episode_id"])
+        plan = _parse_canonical_model(
+            EpisodePlan,
+            cast(bytes, row["plan_json"]),
+            context=f"episode plan {episode_id}",
+        )
+        expected_metadata: dict[str, Any] = {
+            "episode_id": plan.episode_id,
+            "parent_pair_id": plan.parent_pair_id,
+            "condition_index": plan.condition_index,
+            "template_id": plan.template_id.value,
+            "schema_name": plan.schema_name.value,
+            "environment_version": plan.environment_version,
+            "seed": plan.seed,
+            "noise_seed": plan.noise_seed,
+            "audited_target_factor": plan.audited_target_factor,
+            "declared_difference_paths": list(plan.declared_difference_paths),
+            "initial_state_hash": plan.initial_state_hash,
+            "initial_observation_hash": plan.initial_observation_hash,
+            "action_sequence_hash": plan.action_sequence_hash,
+            "codec_version": manifest.resolved_configuration.codec.version,
+            "renderer_version": manifest.resolved_configuration.renderer.version,
+        }
+        for field, expected in expected_metadata.items():
+            if row[field] != expected:
+                raise ValueError(
+                    f"Episode-row metadata mismatch for {plan.episode_id}: "
+                    f"{field} expected={expected!r}, observed={row[field]!r}"
+                )
         plans_by_pair[plan.parent_pair_id].append(plan)
-        if canonical_hash(plan.initial_state) != row["initial_state_hash"]:
-            raise ValueError(f"Initial state hash mismatch for {plan.episode_id}")
-        if (
-            canonical_hash(primary_observation(plan.initial_state))
-            != row["initial_observation_hash"]
-        ):
-            raise ValueError(f"Initial observation hash mismatch for {plan.episode_id}")
-        if canonical_hash(plan.actions) != row["action_sequence_hash"]:
-            raise ValueError(f"Action sequence hash mismatch for {plan.episode_id}")
         episode_steps = sorted(
             steps_by_episode[plan.episode_id], key=lambda item: cast(int, item["step_index"])
         )
-        states: list[Any] = [plan.initial_state.model_dump(mode="json")]
-        observations: list[Any] = [primary_observation(plan.initial_state).model_dump(mode="json")]
-        for step_row in episode_steps:
-            before_obs = _json_value(step_row["observation_before_json"])
-            after_obs = _json_value(step_row["observation_after_json"])
-            assert_relation_labels_absent(before_obs)
-            assert_relation_labels_absent(after_obs)
-            encoded_before = EncodedRecord.model_validate_json(
-                step_row["opaque_observation_before_json"]
+        if len(episode_steps) != len(plan.actions):
+            raise ValueError(
+                f"Planned step-count mismatch for {plan.episode_id}: "
+                f"expected={len(plan.actions)}, observed={len(episode_steps)}"
             )
-            encoded_after = EncodedRecord.model_validate_json(
-                step_row["opaque_observation_after_json"]
+        expected_indices = tuple(
+            range(
+                plan.initial_state.step_index + 1,
+                plan.initial_state.step_index + len(plan.actions) + 1,
             )
-            encoded_action = EncodedRecord.model_validate_json(step_row["opaque_action_json"])
-            if codec.decode_bytes(encoded_before) != step_row["observation_before_json"]:
+        )
+        observed_indices = tuple(cast(int, item["step_index"]) for item in episode_steps)
+        if observed_indices != expected_indices:
+            raise ValueError(
+                f"Non-contiguous declared step indices for {plan.episode_id}: "
+                f"expected={expected_indices}, observed={observed_indices}"
+            )
+
+        states: list[WorldState] = [plan.initial_state]
+        initial_observation = primary_observation(plan.initial_state)
+        observations: list[PrimaryObservation] = [initial_observation]
+        trajectory_records: list[dict[str, Any]] = []
+        preceding_state_after: WorldState | None = None
+        for action_index, step_row in enumerate(episode_steps):
+            step_context = f"{plan.episode_id} step {observed_indices[action_index]}"
+            before_state = _parse_canonical_model(
+                WorldState,
+                cast(bytes, step_row["state_before_json"]),
+                context=f"state-before {step_context}",
+            )
+            before_observation = _parse_canonical_model(
+                PrimaryObservation,
+                cast(bytes, step_row["observation_before_json"]),
+                context=f"observation-before {step_context}",
+            )
+            action = _parse_canonical_model(
+                Action,
+                cast(bytes, step_row["action_json"]),
+                context=f"action {step_context}",
+            )
+            after_state = _parse_canonical_model(
+                WorldState,
+                cast(bytes, step_row["state_after_json"]),
+                context=f"state-after {step_context}",
+            )
+            after_observation = _parse_canonical_model(
+                PrimaryObservation,
+                cast(bytes, step_row["observation_after_json"]),
+                context=f"observation-after {step_context}",
+            )
+            trace = _parse_canonical_model(
+                TransitionTrace,
+                cast(bytes, step_row["trace_json"]),
+                context=f"transition trace {step_context}",
+            )
+            relations = _parse_canonical_relations(
+                cast(bytes, step_row["relations_after_json"]),
+                context=f"relations-after {step_context}",
+            )
+
+            expected_before = plan.initial_state if action_index == 0 else preceding_state_after
+            if before_state != expected_before:
+                if action_index == 0:
+                    raise ValueError(
+                        "First state-before does not equal plan initial state for "
+                        f"{plan.episode_id}"
+                    )
+                raise ValueError(f"State continuity mismatch for {step_context}")
+            if action != plan.actions[action_index]:
+                raise ValueError(f"Stored action does not match planned action for {step_context}")
+
+            recomputed_before_observation = primary_observation(before_state)
+            recomputed_after_observation = primary_observation(after_state)
+            if before_observation != recomputed_before_observation:
+                raise ValueError(
+                    f"Stored observation-before does not match state-before for {step_context}"
+                )
+            if after_observation != recomputed_after_observation:
+                raise ValueError(
+                    f"Stored observation-after does not match state-after for {step_context}"
+                )
+            assert_relation_labels_absent(before_observation)
+            assert_relation_labels_absent(after_observation)
+
+            recomputed = transition(before_state, action)
+            if after_state != recomputed.state:
+                raise ValueError(f"Recomputed state-after mismatch for {step_context}")
+            if trace != recomputed.trace:
+                raise ValueError(f"Recomputed transition trace mismatch for {step_context}")
+            if step_row["transition_hash"] != recomputed.transition_hash:
+                raise ValueError(f"Recomputed transition hash mismatch for {step_context}")
+            expected_relations = derive_relations(after_state, trace)
+            if relations != expected_relations:
+                raise ValueError(f"Recomputed privileged relations mismatch for {step_context}")
+
+            hash_checks = {
+                "state_before_hash": canonical_hash(before_state),
+                "observation_before_hash": canonical_hash(before_observation),
+                "state_after_hash": canonical_hash(after_state),
+                "observation_after_hash": canonical_hash(after_observation),
+            }
+            for hash_field, expected_hash in hash_checks.items():
+                if step_row[hash_field] != expected_hash:
+                    raise ValueError(f"Per-step {hash_field} mismatch for {step_context}")
+
+            encoded_before = _parse_canonical_model(
+                EncodedRecord,
+                cast(bytes, step_row["opaque_observation_before_json"]),
+                context=f"opaque observation-before {step_context}",
+            )
+            encoded_after = _parse_canonical_model(
+                EncodedRecord,
+                cast(bytes, step_row["opaque_observation_after_json"]),
+                context=f"opaque observation-after {step_context}",
+            )
+            encoded_action = _parse_canonical_model(
+                EncodedRecord,
+                cast(bytes, step_row["opaque_action_json"]),
+                context=f"opaque action {step_context}",
+            )
+            if encoded_before.record_kind != "observation":
+                raise ValueError(f"Opaque before record kind mismatch for {step_context}")
+            if encoded_after.record_kind != "observation":
+                raise ValueError(f"Opaque after record kind mismatch for {step_context}")
+            if encoded_action.record_kind != "action":
+                raise ValueError(f"Opaque action record kind mismatch for {step_context}")
+            if codec.decode_bytes(encoded_before) != canonical_record_bytes(before_observation):
                 raise ValueError(f"Opaque before-observation mismatch for {plan.episode_id}")
-            if codec.decode_bytes(encoded_after) != step_row["observation_after_json"]:
+            if codec.decode_bytes(encoded_after) != canonical_record_bytes(after_observation):
                 raise ValueError(f"Opaque after-observation mismatch for {plan.episode_id}")
-            if codec.decode_bytes(encoded_action) != step_row["action_json"]:
+            if codec.decode_bytes(encoded_action) != canonical_record_bytes(action):
                 raise ValueError(f"Opaque action mismatch for {plan.episode_id}")
-            states.append(_json_value(step_row["state_after_json"]))
-            observations.append(after_obs)
+
+            states.append(after_state)
+            observations.append(after_observation)
+            trajectory_records.append(
+                {
+                    "step_index": step_row["step_index"],
+                    "state_before": before_state,
+                    "observation_before": before_observation,
+                    "action": action,
+                    "state_after": after_state,
+                    "observation_after": after_observation,
+                    "trace": trace,
+                    "relations_after": relations,
+                }
+            )
+            preceding_state_after = after_state
+
         if canonical_hash(states) != row["state_hash"]:
             raise ValueError(f"State sequence hash mismatch for {plan.episode_id}")
         if canonical_hash(observations) != row["observation_hash"]:
             raise ValueError(f"Observation sequence hash mismatch for {plan.episode_id}")
-        if (
-            canonical_hash([_trajectory_payload(item) for item in episode_steps])
-            != row["trajectory_hash"]
-        ):
+        if canonical_hash(trajectory_records) != row["trajectory_hash"]:
             raise ValueError(f"Trajectory hash mismatch for {plan.episode_id}")
-        final_state = WorldState.model_validate_json(row["final_state_json"])
+        final_state = _parse_canonical_model(
+            WorldState,
+            cast(bytes, row["final_state_json"]),
+            context=f"final state {plan.episode_id}",
+        )
+        assert preceding_state_after is not None
+        if final_state != preceding_state_after:
+            raise ValueError(
+                f"final_state_json does not equal last state-after for {plan.episode_id}"
+            )
         _, render_hash = render_raw_pixels(
             final_state,
             width=manifest.resolved_configuration.renderer.width,
@@ -581,6 +898,10 @@ def _validate_generation_records(
         if render_hash != row["render_hash"]:
             raise ValueError(f"Raw-pixel render hash mismatch for {plan.episode_id}")
         observed_digests.append(_episode_digest_from_row(row))
+
+    if set(steps_by_episode) != set(episode_ids):
+        missing = sorted(set(episode_ids) - set(steps_by_episode))
+        raise ValueError(f"Episode table entries lack planned step records: {missing}")
     for pair_id, plans in plans_by_pair.items():
         if len(plans) != 2:
             raise ValueError(f"Pair {pair_id} must contain exactly two episode plans")
@@ -592,6 +913,9 @@ def _validate_generation_records(
             episodes=(ordered[0], ordered[1]),
         )
         audit_matched_pair(pair)
+    expected_pair_ids = tuple(sorted(plans_by_pair))
+    if expected_pair_ids != manifest.pair_ids:
+        raise ValueError("Manifest pair IDs do not match the independently verified episode plans")
     if tuple(sorted(observed_digests, key=lambda item: item.episode_id)) != manifest.episodes:
         raise ValueError("Manifest episode digests do not match the Parquet logical records")
     return episode_rows, step_rows
@@ -601,24 +925,41 @@ def validate_core_manifest(manifest_path: Path) -> CoreRunManifest:
     """Validate manifest, artifacts, explicit Parquet schemas, hashes, codec, and pair parity."""
 
     path = manifest_path.resolve()
-    manifest = CoreRunManifest.model_validate_json(path.read_text(encoding="utf-8"))
-    run_directory = path.parent
-    for record in manifest.artifacts:
-        artifact = run_directory / record.path
-        if not artifact.is_file():
-            raise ValueError(f"Manifest artifact is missing: {record.path}")
-        if artifact.stat().st_size != record.size_bytes or sha256_file(artifact) != record.sha256:
-            raise ValueError(f"Manifest artifact identity mismatch: {record.path}")
+    manifest = _parse_canonical_model(
+        CoreRunManifest,
+        path.read_bytes(),
+        context=CORE_MANIFEST_FILENAME,
+    )
+    artifacts = _validate_manifest_artifacts(path, manifest)
+    _validate_embedded_files(manifest, artifacts)
     if manifest.run_kind == "generate_core" and manifest.status == "COMPLETED":
         _validate_generation_records(path, manifest)
     if manifest.run_kind == "replay_core" and manifest.status == "COMPLETED":
         if manifest.replay_report_path is None:
             raise ValueError("Completed replay manifest lacks replay_report_path")
-        report = ReplayReport.model_validate_json(
-            (run_directory / manifest.replay_report_path).read_text(encoding="utf-8")
+        report_path = artifacts.get(manifest.replay_report_path)
+        if report_path is None:
+            raise ValueError("Completed replay manifest lacks its replay-report artifact")
+        report = _parse_canonical_model(
+            ReplayReport,
+            report_path.read_bytes(),
+            context=CORE_REPLAY_REPORT_FILENAME,
         )
         if report.source_manifest_sha256 != manifest.source_manifest_sha256:
             raise ValueError("Replay report and manifest source hashes differ")
+        if report.replayed_episode_digests != manifest.episodes:
+            raise ValueError("Replay report episode digests do not match the replay manifest")
+        replay_pair_ids = tuple(
+            sorted({item.parent_pair_id for item in report.replayed_episode_digests})
+        )
+        if replay_pair_ids != manifest.pair_ids:
+            raise ValueError("Replay report pair IDs do not match the replay manifest")
+        pair_counts: dict[str, int] = defaultdict(int)
+        for digest in report.replayed_episode_digests:
+            pair_counts[digest.parent_pair_id] += 1
+        if any(count != 2 for count in pair_counts.values()):
+            raise ValueError("Replay report must contain exactly two episodes per pair ID")
+    _validate_budget_artifact_totals(manifest)
     return manifest
 
 
@@ -639,12 +980,14 @@ def replay_core(source_manifest_path: Path, *, run_id: str | None = None) -> Cor
     manifest_path = run_directory / CORE_MANIFEST_FILENAME
     report_path = run_directory / CORE_REPLAY_REPORT_FILENAME
     budget_path = run_directory / CORE_BUDGET_FILENAME
+    resolved_path = run_directory / CORE_RESOLVED_CONFIG_FILENAME
     started_at = utc_now()
     started_counter = time.perf_counter()
     counters = _Counters()
     observed: list[CoreEpisodeDigest] = []
     tracemalloc.start()
     try:
+        write_json(resolved_path, source.resolved_configuration)
         codec = OpaqueDiscreteCodec()
         for row in source_rows:
             plan = EpisodePlan.model_validate_json(row["plan_json"])
@@ -663,9 +1006,12 @@ def replay_core(source_manifest_path: Path, *, run_id: str | None = None) -> Cor
             if replay_row["final_state_json"] != row["final_state_json"]:
                 raise ValueError(f"Replay final state bytes differ for {plan.episode_id}")
             observed.append(digest)
+        replayed_digests = tuple(sorted(observed, key=lambda item: item.episode_id))
         report = ReplayReport(
             source_manifest_sha256=source_sha,
-            matched_episode_ids=tuple(sorted(item.episode_id for item in observed)),
+            matched_episode_ids=tuple(item.episode_id for item in replayed_digests),
+            source_episode_digests=source.episodes,
+            replayed_episode_digests=replayed_digests,
         )
         write_json(report_path, report)
         ended_at = utc_now()
@@ -673,7 +1019,7 @@ def replay_core(source_manifest_path: Path, *, run_id: str | None = None) -> Cor
         peak_memory = _peak_and_stop(True)
         budget = _stabilize_budget(
             budget_path=budget_path,
-            stable_paths=[report_path],
+            stable_paths=[resolved_path, report_path],
             run_id=generated_run_id,
             started_at=started_at,
             ended_at=ended_at,
@@ -681,7 +1027,7 @@ def replay_core(source_manifest_path: Path, *, run_id: str | None = None) -> Cor
             peak_memory=peak_memory,
             counters=counters,
         )
-        artifacts = _artifact_records(run_directory, [report_path, budget_path])
+        artifacts = _artifact_records(run_directory, [resolved_path, report_path, budget_path])
         manifest = _manifest(
             run_kind="replay_core",
             run_id=generated_run_id,
@@ -695,7 +1041,7 @@ def replay_core(source_manifest_path: Path, *, run_id: str | None = None) -> Cor
             episodes_path=None,
             steps_path=None,
             replay_report_path=CORE_REPLAY_REPORT_FILENAME,
-            digests=tuple(observed),
+            digests=replayed_digests,
             artifacts=artifacts,
             budget=budget,
         )
@@ -709,7 +1055,7 @@ def replay_core(source_manifest_path: Path, *, run_id: str | None = None) -> Cor
         try:
             budget = _stabilize_budget(
                 budget_path=budget_path,
-                stable_paths=[report_path],
+                stable_paths=[resolved_path, report_path],
                 run_id=generated_run_id,
                 started_at=started_at,
                 ended_at=ended_at,
@@ -717,7 +1063,7 @@ def replay_core(source_manifest_path: Path, *, run_id: str | None = None) -> Cor
                 peak_memory=peak_memory,
                 counters=counters,
             )
-            artifacts = _artifact_records(run_directory, [report_path, budget_path])
+            artifacts = _artifact_records(run_directory, [resolved_path, report_path, budget_path])
             failure_manifest = _manifest(
                 run_kind="replay_core",
                 run_id=generated_run_id,

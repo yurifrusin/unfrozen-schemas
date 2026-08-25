@@ -8,6 +8,10 @@ that a model acquires image schemas.
 ## Identity and arithmetic
 
 - Environment version: `schemaworld-core-v1`.
+- Version posture: Milestone 1 is still unreleased, so these corrections replace the pre-release
+  contract in place and the environment remains `schemaworld-core-v1`. No published core artifact
+  or compatibility promise exists to preserve, and a version bump would incorrectly imply two
+  released scientific environments.
 - State schema version: `1`.
 - Coordinate unit: integer `microunit`.
 - Fixed-point scale: `1`; no floating-point value participates in scientific transitions.
@@ -45,12 +49,17 @@ The privileged `WorldState` contains:
 - container boundary reference, thickness, and closed/open state;
 - opening boundary/side, span, enabled state, and optional gate entity;
 - direct attachment endpoints, active state, and load-bearing property;
-- tether endpoints, exact maximum length, active state, and load-bearing property;
+- tether endpoints, exact declared length, active state, and load-bearing property;
 - delayed events with due step, declared priority, insertion order, kind, and target.
 
 Agent, object, container, gate, support, anchor, and distractor roles share this exact entity record.
-Role-specific behavior is validated by the transition and relation layers. References must exist,
-identifiers must be globally unique, and every collection must use its declared canonical order.
+Role-specific behavior is validated by the state, transition, and relation layers. References must
+exist, identifiers must be globally unique, and every collection must use its declared canonical
+order. Opening spans must lie on the referenced container side excluding its corner squares. A
+referenced gate must be active and its rectangle must exactly cover the aperture segment. Delayed
+events must name an existing target of the type required by their event kind. Attachments and
+tethers must connect an object to an anchor; active connections require active endpoints. An active
+load-bearing tether must also satisfy the exact taut invariant defined below.
 
 ## Primary observation boundary
 
@@ -59,10 +68,11 @@ geometry and motion, numeric entity-kind codes, boundary geometry, aperture stat
 mechanical edges. It does not expose entity-role words, load-bearing annotations, transition traces,
 or verifier relations.
 
-The serializer rejects primary observations containing any of these direct relation labels,
-case-insensitively:
+The serializer constructs its forbidden vocabulary from every privileged `RelationKind` plus the
+declared human-readable synonyms and rejects any occurrence case-insensitively:
 
 ```text
+INTERIOR EXTERIOR FUNCTIONAL_SUPPORT BLOCKAGE CONNECTION MOVEMENT FALLING
 INSIDE OUTSIDE SUPPORTED UNSUPPORTED BLOCKED CONNECTED CONTAINMENT SUPPORT
 ```
 
@@ -71,8 +81,22 @@ and never in primary observations or opaque symbol streams.
 
 ## Action contract
 
-Every action has schema version, kind, optional actor and target, exact integer `delta_x`/`delta_y`,
-and optional non-negative magnitude. The full prospective family is:
+Every action has schema version and kind. The serialized model has actor, target, integer delta, and
+magnitude slots, but their non-default use is governed by this strict matrix; every field not listed
+for a kind is rejected:
+
+| Action kinds | Required non-default fields | Additional rule |
+|---|---|---|
+| `WAIT`, `NOOP` | none | actor, target, deltas, and magnitude are forbidden |
+| `MOVE`, `ENTER`, `EXIT` | `target_id`, exactly one of `delta_x`/`delta_y` | one non-zero axis only; actor and magnitude forbidden |
+| `OPEN`, `CLOSE`, `OPEN_GATE`, `CLOSE_GATE` | `target_id` | target only |
+| `DETACH`, `CUT_OR_BREAK` | `target_id` | connection target only |
+| `REMOVE_SUPPORT` | `target_id` | support target only |
+| `ROTATE` | `target_id`, positive `magnitude` | prospective and unsupported in M1 |
+| `GRASP`, `RELEASE`, `ATTACH` | `actor_id`, `target_id` | prospective and unsupported in M1 |
+| `PUSH`, `PULL`, `LIFT`, `LOWER`, `PROBE_FORCE` | `actor_id`, `target_id`, positive `magnitude` | prospective and unsupported in M1 |
+
+The full prospective family is:
 
 ```text
 MOVE ROTATE GRASP RELEASE PUSH PULL LIFT LOWER OPEN CLOSE ATTACH DETACH
@@ -139,12 +163,25 @@ The version-1 event priorities are attachment disable `10`, tether disable `20`,
 ## CONTAINMENT mechanics
 
 Container interior is the outer rectangle inset by boundary thickness. `INTERIOR` is derived when a
-movable body lies wholly inside that inset rectangle; otherwise `EXTERIOR` is derived. Crossing a
-closed boundary is permitted only through an enabled opening on the crossed side whose span contains
-the complete orthogonal object extent. A closed boundary without such an opening leaves the body
-unchanged and produces privileged blockage evidence. An open boundary does not impede crossing.
-Objects already outside that move parallel to a boundary are a negative case and are not marked
-blocked.
+movable body lies wholly inside that inset rectangle; otherwise `EXTERIOR` is derived. `MOVE`,
+`ENTER`, and `EXIT` are axis-aligned only; diagonal actions are malformed and rejected before a
+transition.
+
+For a prospective movement, the verifier forms the exact axis-aligned swept rectangle. On the
+movement axis it tests the open interval from the minimum starting/proposed lower edge to the maximum
+starting/proposed upper edge against every left/right or bottom/top interior boundary plane of every
+closed container. Every intersected plane is a crossing, including both planes in an
+outside-to-outside leap and a plane already partially intersecting the starting rectangle. Each
+crossing requires an enabled opening on that exact side whose inclusive span contains the complete
+orthogonal object extent at the crossing. Missing, undersized, or misaligned apertures leave the body
+unchanged and produce privileged blockage evidence. A boundary with `closed=false` is open along its
+whole perimeter and imposes no crossing check. World bounds remain mandatory.
+
+Touching without penetration uses exact open-interval semantics: a body touching a plane and moving
+away does not cross it; moving through it does. A partially overlapping starting body is fail-closed
+for perpendicular movement unless a correctly aligned enabled opening covers it. Parallel movement
+does not cross that plane. An object wholly outside that moves parallel to a boundary remains the
+declared non-blocked negative case.
 
 The matched containment pair has equal planned motion and differs only in the opening's initial
 enabled field. Its parity auditor requires that single declared leaf difference.
@@ -155,15 +192,21 @@ A lower-surface contact exists when an object's bottom equals another active bod
 horizontal intervals overlap positively. It is functional lower support only when the lower body has
 the support role. Side contact, zero-width contact, and geometric overlap are non-supporting.
 
-An active load-bearing direct attachment supports its object while both endpoints are active. An
-active load-bearing tether supports its object when the anchor is above it and the exact squared
-centre distance does not exceed the squared maximum tether length. This integer comparison uses no
-square root or floating point.
+An active load-bearing direct attachment supports its object while both endpoints are active. In
+`schemaworld-core-v1`, an active load-bearing tether is a taut inextensible link, not a maximum-range
+constraint. Its anchor centre must be above the object centre and the squared doubled-centre distance
+must equal `(2 * declared_length)²` exactly. Overlength and underlength/slack active load-bearing
+states are invalid. M1 does not implement slack-to-taut motion, so it does not admit slack
+load-bearing tethers. Inactive and active non-load-bearing tethers may be slack but never provide
+functional support. A movement that would break an active load-bearing tether invariant raises
+`IllegalActionError`; it is not accepted as a blocked or malformed successor. Every accepted final
+state is revalidated against the invariant. This comparison uses no square root or floating point.
 
 The ordinary platform pair begins from one identical state and contrasts actual platform removal
 with explicit `NOOP`. The tension pair begins from one identical state with visible side contact and
-load-bearing tension; it contrasts removal of the visible non-supporting body with removal of the
-true tether mechanism. Pair generation fails if any undeclared leaf differs.
+a genuinely taut 350-microunit load-bearing tether; it contrasts removal of the visible
+non-supporting body with removal of the true tether mechanism. Pair generation fails if any
+undeclared leaf differs.
 
 ## Privileged relations and transition traces
 
@@ -190,6 +233,13 @@ ordering, Python hash ordering, or Parquet metadata. The following identities ar
 - render hash: SHA-256 of renderer version, mode, dimensions, and raw RGB pixels;
 - artifact hash: ordinary SHA-256 of each retained file, including Parquet and budget files.
 
+`pair_id` is the first 16 hexadecimal characters of a canonical pre-ID payload containing
+environment version, template family, seed, noise seed, gravity, maximum steps, both complete initial
+states, both complete action sequences, the target-factor declaration, and the declared difference
+paths. The payload contains neither the final pair ID nor episode IDs. Each episode ID is derived
+from that same pre-ID payload plus its condition index. This makes IDs sensitive to every causal
+input without circular hashing.
+
 The PNG hash and raw Parquet file hashes are artifact identities only. Neither replaces the render or
 trajectory identity.
 
@@ -211,9 +261,22 @@ seed, audited factor/path declarations, all canonical hashes, and canonical plan
 The step table stores canonical before/action/after state and observation bytes, opaque streams,
 privileged trace/relations, and per-step hashes.
 
-Validation reads the exact schemas back, verifies every logical and artifact hash, decodes every
-opaque stream, audits every pair, regenerates raw-pixel hashes, and rejects relation labels in primary
-observations. Scientific identity remains the canonical logical record even if future compatible
+`validate-core` is an independent verifier, not a replay-result assertion. It checks every episode
+row against its typed `EpisodePlan`; requires the exact planned step count and contiguous indices;
+parses canonical typed before/after states and observations, actions, traces, relations, and opaque
+records; checks initial state and inter-step continuity; compares stored and planned actions;
+recomputes both observations; independently calls `transition`; and requires exact state, trace,
+transition-hash, relation, per-step hash, opaque, aggregate state/observation/trajectory, final-state,
+and raw-pixel-render equality.
+
+It also requires the exact mandatory artifact set, canonical safe run-relative paths, artifact hashes,
+an external `resource_budget.json` equal to the embedded budget, and an external
+`resolved_core_config.json` equal to the embedded configuration. Absolute paths, backslashes, empty
+segments, `.`/`..` traversal, duplicate artifact paths, duplicate episode IDs, duplicate pair IDs,
+duplicate step keys, missing pair members, and unexpected step episodes fail closed. Replay manifests
+retain the resolved configuration and a typed report containing both complete source and replayed
+episode digests; validation requires those digests, IDs, pair membership, and source-manifest hash to
+agree exactly. Scientific identity remains the canonical logical record even if future compatible
 Parquet container metadata differs.
 
 ## Renderer

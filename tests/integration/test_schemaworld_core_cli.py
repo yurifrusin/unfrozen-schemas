@@ -10,7 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from unfrozen_schemas.cli import app
-from unfrozen_schemas.data.core_models import CoreRunManifest
+from unfrozen_schemas.data.core_models import CoreRunManifest, ReplayReport
 from unfrozen_schemas.data.core_runner import CORE_MANIFEST_FILENAME, validate_core_manifest
 
 
@@ -57,6 +57,17 @@ def test_core_cli_generation_replay_and_render_are_offline_and_complete(
     assert replay.episodes == source.episodes
     assert replay.resource_budget.environment_steps == source.resource_budget.environment_steps
     assert replay.source_manifest_sha256 is not None
+    assert replay.replay_report_path is not None
+    report = ReplayReport.model_validate_json(
+        (replay_path.parent / replay.replay_report_path).read_text(encoding="utf-8")
+    )
+    assert report.source_episode_digests == source.episodes
+    assert report.replayed_episode_digests == replay.episodes
+    assert {item.path for item in replay.artifacts} == {
+        "replay_report.json",
+        "resolved_core_config.json",
+        "resource_budget.json",
+    }
 
     episode_id = source.episodes[0].episode_id
     png = tmp_path / "representative.png"

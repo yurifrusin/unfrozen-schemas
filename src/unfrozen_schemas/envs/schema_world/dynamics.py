@@ -5,11 +5,12 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Final, Literal
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from unfrozen_schemas.config import FrozenModel
 from unfrozen_schemas.envs.schema_world.actions import Action, ActionKind, validate_action
 from unfrozen_schemas.envs.schema_world.events import DelayedEvent, DelayedEventKind, event_sort_key
+from unfrozen_schemas.envs.schema_world.protocol import IllegalActionError
 from unfrozen_schemas.envs.schema_world.serialization import canonical_hash
 from unfrozen_schemas.envs.schema_world.state import (
     Attachment,
@@ -20,6 +21,7 @@ from unfrozen_schemas.envs.schema_world.state import (
     Opening,
     Tether,
     WorldState,
+    tether_is_exactly_taut,
 )
 
 TRANSITION_STAGE_ORDER: Final[tuple[str, ...]] = (
@@ -123,37 +125,27 @@ def _interior(container: Entity, boundary: Boundary) -> tuple[int, int, int, int
     )
 
 
-def _fully_within(entity: Entity, bounds: tuple[int, int, int, int]) -> bool:
-    left, right, bottom, top = bounds
-    return (
-        entity.x >= left
-        and entity.x + entity.width <= right
-        and entity.y >= bottom
-        and entity.y + entity.height <= top
-    )
-
-
 def _crossed_sides(
     before: Entity, proposed: Entity, bounds: tuple[int, int, int, int]
 ) -> tuple[BoundarySide, ...]:
+    """Return every boundary plane intersected by the open swept rectangle extent."""
+
     left, right, bottom, top = bounds
     sides: list[BoundarySide] = []
-    if (before.x >= left and proposed.x < left) or (
-        before.x + before.width <= left and proposed.x + proposed.width > left
-    ):
-        sides.append(BoundarySide.LEFT)
-    if (before.x + before.width <= right and proposed.x + proposed.width > right) or (
-        before.x >= right and proposed.x < right
-    ):
-        sides.append(BoundarySide.RIGHT)
-    if (before.y >= bottom and proposed.y < bottom) or (
-        before.y + before.height <= bottom and proposed.y + proposed.height > bottom
-    ):
-        sides.append(BoundarySide.BOTTOM)
-    if (before.y + before.height <= top and proposed.y + proposed.height > top) or (
-        before.y >= top and proposed.y < top
-    ):
-        sides.append(BoundarySide.TOP)
+    if before.x != proposed.x:
+        swept_left = min(before.x, proposed.x)
+        swept_right = max(before.x + before.width, proposed.x + proposed.width)
+        if swept_left < left < swept_right:
+            sides.append(BoundarySide.LEFT)
+        if swept_left < right < swept_right:
+            sides.append(BoundarySide.RIGHT)
+    if before.y != proposed.y:
+        swept_bottom = min(before.y, proposed.y)
+        swept_top = max(before.y + before.height, proposed.y + proposed.height)
+        if swept_bottom < bottom < swept_top:
+            sides.append(BoundarySide.BOTTOM)
+        if swept_bottom < top < swept_top:
+            sides.append(BoundarySide.TOP)
     return tuple(sides)
 
 
@@ -173,19 +165,28 @@ def _movement_blockers(state: WorldState, before: Entity, proposed: Entity) -> t
             continue
         container = entities[boundary.container_id]
         bounds = _interior(container, boundary)
-        before_inside = _fully_within(before, bounds)
-        proposed_inside = _fully_within(proposed, bounds)
-        if before_inside == proposed_inside:
-            continue
         crossed = _crossed_sides(before, proposed, bounds)
+        if not crossed:
+            continue
         boundary_openings = tuple(
             opening for opening in state.openings if opening.boundary_id == boundary.boundary_id
         )
-        for side in crossed:
-            if not any(_fits_opening(proposed, side, opening) for opening in boundary_openings):
-                blockers.append(boundary.boundary_id)
-                break
+        if any(
+            not any(_fits_opening(before, side, opening) for opening in boundary_openings)
+            for side in crossed
+        ):
+            blockers.append(boundary.boundary_id)
     return tuple(sorted(set(blockers)))
+
+
+def _validated_action_state(candidate: WorldState, action: Action) -> WorldState:
+    try:
+        return WorldState.model_validate(candidate.model_dump(mode="python"))
+    except ValidationError as exc:
+        raise IllegalActionError(
+            f"{action.kind.value} would violate SchemaWorld state invariants: "
+            f"{exc.errors()[0]['msg']}"
+        ) from exc
 
 
 def _apply_action(
@@ -209,37 +210,49 @@ def _apply_action(
         else:
             blocked_by = _movement_blockers(state, before, proposed)
         if not blocked_by:
-            state = state.model_copy(update={"entities": _replace_entity(state.entities, proposed)})
+            state = _validated_action_state(
+                state.model_copy(update={"entities": _replace_entity(state.entities, proposed)}),
+                action,
+            )
             moved = (before.entity_id,)
     elif action.kind in {ActionKind.OPEN, ActionKind.OPEN_GATE}:
         assert action.target_id is not None
         opening = next(item for item in state.openings if item.opening_id == action.target_id)
-        state = state.model_copy(
-            update={
-                "openings": _replace_opening(
-                    state.openings, opening.model_copy(update={"enabled": True})
-                )
-            }
+        state = _validated_action_state(
+            state.model_copy(
+                update={
+                    "openings": _replace_opening(
+                        state.openings, opening.model_copy(update={"enabled": True})
+                    )
+                }
+            ),
+            action,
         )
     elif action.kind in {ActionKind.CLOSE, ActionKind.CLOSE_GATE}:
         assert action.target_id is not None
         opening = next(item for item in state.openings if item.opening_id == action.target_id)
-        state = state.model_copy(
-            update={
-                "openings": _replace_opening(
-                    state.openings, opening.model_copy(update={"enabled": False})
-                )
-            }
+        state = _validated_action_state(
+            state.model_copy(
+                update={
+                    "openings": _replace_opening(
+                        state.openings, opening.model_copy(update={"enabled": False})
+                    )
+                }
+            ),
+            action,
         )
     elif action.kind is ActionKind.REMOVE_SUPPORT:
         assert action.target_id is not None
         target = state.entity(action.target_id)
-        state = state.model_copy(
-            update={
-                "entities": _replace_entity(
-                    state.entities, target.model_copy(update={"active": False})
-                )
-            }
+        state = _validated_action_state(
+            state.model_copy(
+                update={
+                    "entities": _replace_entity(
+                        state.entities, target.model_copy(update={"active": False})
+                    )
+                }
+            ),
+            action,
         )
     elif action.kind in {ActionKind.DETACH, ActionKind.CUT_OR_BREAK}:
         assert action.target_id is not None
@@ -247,21 +260,27 @@ def _apply_action(
             (item for item in state.attachments if item.attachment_id == action.target_id), None
         )
         if attachment is not None:
-            state = state.model_copy(
-                update={
-                    "attachments": _replace_attachment(
-                        state.attachments, attachment.model_copy(update={"active": False})
-                    )
-                }
+            state = _validated_action_state(
+                state.model_copy(
+                    update={
+                        "attachments": _replace_attachment(
+                            state.attachments, attachment.model_copy(update={"active": False})
+                        )
+                    }
+                ),
+                action,
             )
         else:
             tether = next(item for item in state.tethers if item.tether_id == action.target_id)
-            state = state.model_copy(
-                update={
-                    "tethers": _replace_tether(
-                        state.tethers, tether.model_copy(update={"active": False})
-                    )
-                }
+            state = _validated_action_state(
+                state.model_copy(
+                    update={
+                        "tethers": _replace_tether(
+                            state.tethers, tether.model_copy(update={"active": False})
+                        )
+                    }
+                ),
+                action,
             )
     return state, blocked_by, moved
 
@@ -303,14 +322,7 @@ def _tether_is_taut(state: WorldState, tether: Tether) -> bool:
     anchor = state.entity(tether.anchor_id)
     if not obj.active or not anchor.active:
         return False
-    object_centre_x = 2 * obj.x + obj.width
-    object_centre_y = 2 * obj.y + obj.height
-    anchor_centre_x = 2 * anchor.x + anchor.width
-    anchor_centre_y = 2 * anchor.y + anchor.height
-    delta_x = anchor_centre_x - object_centre_x
-    delta_y = anchor_centre_y - object_centre_y
-    doubled_max_length = 2 * tether.max_length
-    return delta_y > 0 and delta_x * delta_x + delta_y * delta_y <= doubled_max_length**2
+    return tether_is_exactly_taut(tether, obj, anchor)
 
 
 def derive_functional_supports(
@@ -419,7 +431,19 @@ def _apply_one_event(state: WorldState, event: DelayedEvent) -> WorldState:
             update={
                 "entities": _replace_entity(
                     state.entities, entity_target.model_copy(update={"active": False})
-                )
+                ),
+                "attachments": tuple(
+                    item.model_copy(update={"active": False})
+                    if item.active and event.target_id in {item.object_id, item.anchor_id}
+                    else item
+                    for item in state.attachments
+                ),
+                "tethers": tuple(
+                    item.model_copy(update={"active": False})
+                    if item.active and event.target_id in {item.object_id, item.anchor_id}
+                    else item
+                    for item in state.tethers
+                ),
             }
         )
     if event.kind is DelayedEventKind.ENABLE_OPENING:
@@ -483,6 +507,12 @@ def transition(state: WorldState, action: Action) -> TransitionResult:
     final_state = event_state.model_copy(
         update={"step_index": next_step, "terminated": next_step >= state.max_steps}
     )
+    try:
+        final_state = WorldState.model_validate(final_state.model_dump(mode="python"))
+    except ValidationError as exc:
+        raise IllegalActionError(
+            f"Transition would violate SchemaWorld state invariants: {exc.errors()[0]['msg']}"
+        ) from exc
     notes = (
         "Delayed events execute after collision resolution; "
         "their physical effects begin next step.",

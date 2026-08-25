@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from unfrozen_schemas.envs.schema_world.actions import Action, ActionKind
 from unfrozen_schemas.envs.schema_world.dynamics import (
     TRANSITION_STAGE_ORDER,
     ContactKind,
     SupportKind,
+    derive_contacts,
+    derive_functional_supports,
     transition,
 )
 from unfrozen_schemas.envs.schema_world.events import (
@@ -14,6 +19,7 @@ from unfrozen_schemas.envs.schema_world.events import (
     DelayedEvent,
     DelayedEventKind,
 )
+from unfrozen_schemas.envs.schema_world.protocol import IllegalActionError
 from unfrozen_schemas.envs.schema_world.state import (
     Attachment,
     Boundary,
@@ -131,7 +137,7 @@ def _support_state(
                 tether_id="t0001",
                 object_id="e0001",
                 anchor_id="e0003",
-                max_length=400,
+                length=350,
             ),
         )
         if tether
@@ -159,6 +165,158 @@ def test_open_boundary_allows_exit_without_an_enabled_aperture() -> None:
         Action(kind=ActionKind.EXIT, target_id="e0001", delta_x=300),
     )
     assert result.state.entity("e0001").x == 1000
+
+
+def _tunnelling_state(
+    *, left_enabled: bool, right_enabled: bool, closed: bool = True, start_x: int = 100
+) -> WorldState:
+    return WorldState(
+        gravity_per_step=-100,
+        seed=1,
+        noise_seed=2,
+        step_index=0,
+        max_steps=5,
+        entities=(
+            Entity(
+                entity_id="e0001",
+                role=EntityRole.OBJECT,
+                x=start_x,
+                y=500,
+                width=100,
+                height=100,
+                movable=True,
+            ),
+            Entity(
+                entity_id="e0002",
+                role=EntityRole.CONTAINER,
+                x=300,
+                y=100,
+                width=800,
+                height=800,
+            ),
+        ),
+        boundaries=(
+            Boundary(
+                boundary_id="b0001",
+                container_id="e0002",
+                thickness=20,
+                closed=closed,
+            ),
+        ),
+        openings=(
+            Opening(
+                opening_id="o0001",
+                boundary_id="b0001",
+                side=BoundarySide.LEFT,
+                span_start=400,
+                span_end=700,
+                enabled=left_enabled,
+            ),
+            Opening(
+                opening_id="o0002",
+                boundary_id="b0001",
+                side=BoundarySide.RIGHT,
+                span_start=400,
+                span_end=700,
+                enabled=right_enabled,
+            ),
+        ),
+    )
+
+
+def test_swept_boundary_blocks_forward_and_reverse_outside_to_outside_tunnelling() -> None:
+    forward = transition(
+        _tunnelling_state(left_enabled=True, right_enabled=False),
+        Action(kind=ActionKind.MOVE, target_id="e0001", delta_x=1100),
+    )
+    assert forward.state.entity("e0001").x == 100
+    assert forward.trace.blocked_by == ("b0001",)
+
+    reverse = transition(
+        _tunnelling_state(
+            left_enabled=False,
+            right_enabled=True,
+            start_x=1200,
+        ),
+        Action(kind=ActionKind.MOVE, target_id="e0001", delta_x=-1100),
+    )
+    assert reverse.state.entity("e0001").x == 1200
+    assert reverse.trace.blocked_by == ("b0001",)
+
+
+def test_large_sweep_requires_an_opening_at_every_crossed_plane() -> None:
+    passed = transition(
+        _tunnelling_state(left_enabled=True, right_enabled=True),
+        Action(kind=ActionKind.MOVE, target_id="e0001", delta_x=1100),
+    )
+    assert passed.state.entity("e0001").x == 1200
+    assert passed.trace.blocked_by == ()
+
+    whole_boundary_open = transition(
+        _tunnelling_state(left_enabled=False, right_enabled=False, closed=False),
+        Action(kind=ActionKind.MOVE, target_id="e0001", delta_x=1100),
+    )
+    assert whole_boundary_open.state.entity("e0001").x == 1200
+
+
+def test_partial_boundary_start_is_fail_closed_without_a_fitting_opening() -> None:
+    base = _containment_state()
+    partial = base.entities[0].model_copy(update={"x": 850})
+    partial_state = WorldState.model_validate(
+        {**base.model_dump(), "entities": (partial, *base.entities[1:])}
+    )
+    blocked = transition(
+        partial_state,
+        Action(kind=ActionKind.MOVE, target_id="e0001", delta_x=100),
+    )
+    assert blocked.state.entity("e0001").x == 850
+    assert blocked.trace.blocked_by == ("b0001",)
+
+    enabled = WorldState.model_validate(
+        {
+            **partial_state.model_dump(),
+            "openings": (partial_state.openings[0].model_copy(update={"enabled": True}),),
+        }
+    )
+    passed = transition(
+        enabled,
+        Action(kind=ActionKind.MOVE, target_id="e0001", delta_x=100),
+    )
+    assert passed.state.entity("e0001").x == 950
+
+
+def test_aperture_fit_uses_exact_span_and_orthogonal_crossing_alignment() -> None:
+    base = _containment_state(enabled=True)
+    too_small = Opening(
+        opening_id="o0001",
+        boundary_id="b0001",
+        side=BoundarySide.RIGHT,
+        span_start=425,
+        span_end=475,
+        enabled=True,
+    )
+    too_small_state = WorldState.model_validate({**base.model_dump(), "openings": (too_small,)})
+    blocked_small = transition(
+        too_small_state,
+        Action(kind=ActionKind.EXIT, target_id="e0001", delta_x=300),
+    )
+    assert blocked_small.trace.blocked_by == ("b0001",)
+
+    misaligned_object = base.entities[0].model_copy(update={"y": 700})
+    misaligned = WorldState.model_validate(
+        {**base.model_dump(), "entities": (misaligned_object, *base.entities[1:])}
+    )
+    blocked_alignment = transition(
+        misaligned,
+        Action(kind=ActionKind.EXIT, target_id="e0001", delta_x=300),
+    )
+    assert blocked_alignment.trace.blocked_by == ("b0001",)
+
+    aligned = transition(
+        base,
+        Action(kind=ActionKind.EXIT, target_id="e0001", delta_x=300),
+    )
+    assert aligned.trace.blocked_by == ()
 
 
 def test_entry_and_open_action_use_the_same_exact_aperture_contract() -> None:
@@ -217,6 +375,87 @@ def test_tension_support_survives_platform_removal_then_detach_causes_fall() -> 
     detached = transition(held.state, Action(kind=ActionKind.DETACH, target_id="t0001"))
     assert detached.state.entity("e0001").y == 400
     assert detached.trace.falling_entities == ("e0001",)
+
+
+def test_taut_tether_support_uses_exact_squared_integer_equality() -> None:
+    state = _support_state(tether=True, platform_active=False)
+    supports = derive_functional_supports(state, derive_contacts(state))
+    assert [(item.kind, item.mechanism_id) for item in supports] == [(SupportKind.TENSION, "t0001")]
+
+
+@pytest.mark.parametrize(
+    ("length", "anchor_y"),
+    [
+        (400, 900),  # underlength/slack: distance 350 is below the declaration
+        (300, 900),  # overlength: distance 350 exceeds the declaration
+        (250, 300),  # exact distance but anchor is below the object
+    ],
+)
+def test_active_load_bearing_tether_rejects_slack_overlength_and_anchor_not_above(
+    length: int, anchor_y: int
+) -> None:
+    base = _support_state(platform_active=False)
+    anchor = base.entity("e0003").model_copy(update={"y": anchor_y})
+    with pytest.raises(ValidationError, match="exact declared length"):
+        WorldState(
+            **{
+                **base.model_dump(),
+                "entities": (base.entities[0], base.entities[1], anchor),
+                "tethers": (
+                    Tether(
+                        tether_id="t0001",
+                        object_id="e0001",
+                        anchor_id="e0003",
+                        length=length,
+                    ),
+                ),
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("active", "load_bearing"),
+    [(False, True), (True, False)],
+)
+def test_inactive_or_non_load_bearing_tether_is_not_functional_support(
+    active: bool, load_bearing: bool
+) -> None:
+    base = _support_state(platform_active=False)
+    state = WorldState(
+        **{
+            **base.model_dump(),
+            "tethers": (
+                Tether(
+                    tether_id="t0001",
+                    object_id="e0001",
+                    anchor_id="e0003",
+                    length=400,
+                    active=active,
+                    load_bearing=load_bearing,
+                ),
+            ),
+        }
+    )
+    assert derive_functional_supports(state, derive_contacts(state)) == ()
+
+
+def test_action_that_would_break_tether_invariant_is_rejected() -> None:
+    with pytest.raises(IllegalActionError, match="state invariants"):
+        transition(
+            _support_state(tether=True),
+            Action(kind=ActionKind.MOVE, target_id="e0001", delta_x=1),
+        )
+
+
+@pytest.mark.parametrize("kind", [ActionKind.DETACH, ActionKind.CUT_OR_BREAK])
+def test_detach_and_cut_cause_fall_in_the_same_accepted_step(kind: ActionKind) -> None:
+    result = transition(
+        _support_state(tether=True, platform_active=False),
+        Action(kind=kind, target_id="t0001"),
+    )
+    assert result.state.entity("e0001").y == 400
+    assert result.state.entity("e0001").velocity_y == -100
+    assert result.trace.falling_entities == ("e0001",)
 
 
 def test_direct_attachment_is_functional_support_until_detached() -> None:

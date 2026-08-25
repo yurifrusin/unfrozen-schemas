@@ -16,15 +16,15 @@ from unfrozen_schemas.envs.schema_world.templates import TemplateFamily, generat
     [
         (
             TemplateFamily.CONTAINMENT_GATE,
-            "a3e594eb812fd4da4129f61802fb0a52f2d963341a9b73657df38c00741474d5",
+            "09bd2fb9ee22cc6fe21af537518e9f57c59022d64f3ac80e4b476b89314949a0",
         ),
         (
             TemplateFamily.SUPPORT_PLATFORM,
-            "945c715a4e6dace0999de60ec0c4ce0f72f9cf725f7426cdd5678b8310cf22c0",
+            "d8191a727e0f0c24ed11780a506c76f60157c79aed9f265825c5735ae2031a5f",
         ),
         (
             TemplateFamily.SUPPORT_TENSION,
-            "279939eacddc980dc5d713d05ffe0c667e886ebd3680fc6b923e657503517eb6",
+            "1dbcc1d9368e4baf68349ff6f0edeb832c52406c2ecdc6d4a3eed77bf193ef37",
         ),
     ],
 )

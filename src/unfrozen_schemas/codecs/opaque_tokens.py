@@ -10,11 +10,9 @@ from typing import Any, Final, Literal
 from pydantic import Field, model_validator
 
 from unfrozen_schemas.config import FrozenModel
+from unfrozen_schemas.envs.schema_world.relation_kinds import FORBIDDEN_RELATION_LABELS
 from unfrozen_schemas.envs.schema_world.rng import DeterministicGenerator
-from unfrozen_schemas.envs.schema_world.serialization import (
-    FORBIDDEN_RELATION_LABELS,
-    canonical_record_bytes,
-)
+from unfrozen_schemas.envs.schema_world.serialization import canonical_record_bytes
 
 CODEC_VERSION: Final = "opaque-byte-v1"
 _SYMBOL_PATTERN: Final = re.compile(r"^u[0-9]{4}$")

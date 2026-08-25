@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import pytest
 
+from unfrozen_schemas.envs.schema_world.actions import Action, ActionKind
 from unfrozen_schemas.envs.schema_world.dynamics import transition
 from unfrozen_schemas.envs.schema_world.relations import RelationKind, derive_relations
 from unfrozen_schemas.envs.schema_world.serialization import (
     FORBIDDEN_RELATION_LABELS,
+    canonical_hash,
     canonical_record_bytes,
     primary_observation,
 )
 from unfrozen_schemas.envs.schema_world.templates import (
     MatchedPair,
+    PairIdentity,
     PairParityError,
     TemplateFamily,
     audit_matched_pair,
+    derive_pair_id,
     generate_matched_pair,
 )
 
@@ -42,7 +46,13 @@ def test_undeclared_pair_difference_is_rejected() -> None:
     changed_state = right.initial_state.model_copy(
         update={"entities": (changed_entity, *right.initial_state.entities[1:])}
     )
-    changed_right = right.model_copy(update={"initial_state": changed_state})
+    changed_right = right.model_copy(
+        update={
+            "initial_state": changed_state,
+            "initial_state_hash": canonical_hash(changed_state),
+            "initial_observation_hash": canonical_hash(primary_observation(changed_state)),
+        }
+    )
     changed_pair = MatchedPair(
         pair_id=pair.pair_id,
         target_factor=pair.target_factor,
@@ -51,6 +61,89 @@ def test_undeclared_pair_difference_is_rejected() -> None:
     )
     with pytest.raises(PairParityError, match="outside its declaration"):
         audit_matched_pair(changed_pair)
+
+
+def _pair_identity(pair: MatchedPair) -> PairIdentity:
+    left, right = pair.episodes
+    return PairIdentity(
+        template_family=left.template_id,
+        seed=left.seed,
+        noise_seed=left.noise_seed,
+        gravity_per_step=left.initial_state.gravity_per_step,
+        max_steps=left.initial_state.max_steps,
+        initial_states=(left.initial_state, right.initial_state),
+        actions=(left.actions, right.actions),
+        target_factor=pair.target_factor,
+        declared_difference_paths=pair.declared_difference_paths,
+    )
+
+
+def test_pair_id_covers_gravity_horizon_actions_and_every_initial_state_leaf() -> None:
+    pair = generate_matched_pair(
+        TemplateFamily.CONTAINMENT_GATE,
+        seed=101,
+        noise_seed=201,
+        gravity=-100,
+        max_steps=4,
+    )
+    identity = _pair_identity(pair)
+    assert derive_pair_id(identity) == pair.pair_id
+    assert (
+        generate_matched_pair(
+            TemplateFamily.CONTAINMENT_GATE,
+            seed=101,
+            noise_seed=201,
+            gravity=-101,
+            max_steps=4,
+        ).pair_id
+        != pair.pair_id
+    )
+    assert (
+        generate_matched_pair(
+            TemplateFamily.CONTAINMENT_GATE,
+            seed=101,
+            noise_seed=201,
+            gravity=-100,
+            max_steps=5,
+        ).pair_id
+        != pair.pair_id
+    )
+
+    changed_action = Action(kind=ActionKind.EXIT, target_id="e0001", delta_x=301)
+    changed_actions = identity.model_copy(
+        update={"actions": ((changed_action,), (changed_action,))}
+    )
+    assert derive_pair_id(changed_actions) != pair.pair_id
+
+    changed_entity = identity.initial_states[0].entities[0].model_copy(update={"x": 699})
+    changed_state = identity.initial_states[0].model_copy(
+        update={"entities": (changed_entity, *identity.initial_states[0].entities[1:])}
+    )
+    changed_initial_state = identity.model_copy(
+        update={"initial_states": (changed_state, identity.initial_states[1])}
+    )
+    assert derive_pair_id(changed_initial_state) != pair.pair_id
+    assert (
+        derive_pair_id(identity.model_copy(update={"target_factor": "changed target factor"}))
+        != pair.pair_id
+    )
+    assert (
+        derive_pair_id(
+            identity.model_copy(
+                update={"declared_difference_paths": (*identity.declared_difference_paths, "x")}
+            )
+        )
+        != pair.pair_id
+    )
+
+
+def test_episode_ids_are_unique_stable_and_derived_without_circular_pair_fields() -> None:
+    first = generate_matched_pair(TemplateFamily.SUPPORT_PLATFORM, seed=7, noise_seed=8)
+    second = generate_matched_pair(TemplateFamily.SUPPORT_PLATFORM, seed=7, noise_seed=8)
+    assert tuple(item.episode_id for item in first.episodes) == tuple(
+        item.episode_id for item in second.episodes
+    )
+    assert len({item.episode_id for item in first.episodes}) == 2
 
 
 def test_containment_relation_truth_table_and_blockage_are_derived() -> None:

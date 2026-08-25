@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final, Literal
 
 from pydantic import Field, model_validator
 
@@ -52,6 +54,65 @@ SUPPORTED_PHASE1_ACTIONS = frozenset(
     }
 )
 
+ActionParameter = Literal["actor_id", "target_id", "delta_x", "delta_y", "magnitude"]
+
+
+@dataclass(frozen=True, slots=True)
+class ActionParameterRule:
+    """Canonical non-default parameter shape for one action kind."""
+
+    allowed: frozenset[ActionParameter]
+    required: frozenset[ActionParameter]
+    exactly_one_axis: bool = False
+    positive_magnitude: bool = False
+
+
+_NONE = ActionParameterRule(frozenset(), frozenset())
+_TARGET_ONLY = ActionParameterRule(frozenset({"target_id"}), frozenset({"target_id"}))
+_MOVEMENT = ActionParameterRule(
+    frozenset({"target_id", "delta_x", "delta_y"}),
+    frozenset({"target_id"}),
+    exactly_one_axis=True,
+)
+_TARGET_MAGNITUDE = ActionParameterRule(
+    frozenset({"target_id", "magnitude"}),
+    frozenset({"target_id", "magnitude"}),
+    positive_magnitude=True,
+)
+_ACTOR_TARGET = ActionParameterRule(
+    frozenset({"actor_id", "target_id"}),
+    frozenset({"actor_id", "target_id"}),
+)
+_ACTOR_TARGET_MAGNITUDE = ActionParameterRule(
+    frozenset({"actor_id", "target_id", "magnitude"}),
+    frozenset({"actor_id", "target_id", "magnitude"}),
+    positive_magnitude=True,
+)
+
+ACTION_PARAMETER_MATRIX: Final[dict[ActionKind, ActionParameterRule]] = {
+    ActionKind.MOVE: _MOVEMENT,
+    ActionKind.ROTATE: _TARGET_MAGNITUDE,
+    ActionKind.GRASP: _ACTOR_TARGET,
+    ActionKind.RELEASE: _ACTOR_TARGET,
+    ActionKind.PUSH: _ACTOR_TARGET_MAGNITUDE,
+    ActionKind.PULL: _ACTOR_TARGET_MAGNITUDE,
+    ActionKind.LIFT: _ACTOR_TARGET_MAGNITUDE,
+    ActionKind.LOWER: _ACTOR_TARGET_MAGNITUDE,
+    ActionKind.OPEN: _TARGET_ONLY,
+    ActionKind.CLOSE: _TARGET_ONLY,
+    ActionKind.ATTACH: _ACTOR_TARGET,
+    ActionKind.DETACH: _TARGET_ONLY,
+    ActionKind.CUT_OR_BREAK: _TARGET_ONLY,
+    ActionKind.WAIT: _NONE,
+    ActionKind.PROBE_FORCE: _ACTOR_TARGET_MAGNITUDE,
+    ActionKind.NOOP: _NONE,
+    ActionKind.ENTER: _MOVEMENT,
+    ActionKind.EXIT: _MOVEMENT,
+    ActionKind.OPEN_GATE: _TARGET_ONLY,
+    ActionKind.CLOSE_GATE: _TARGET_ONLY,
+    ActionKind.REMOVE_SUPPORT: _TARGET_ONLY,
+}
+
 
 class Action(FrozenModel):
     """One versioned structured action; later-phase semantics remain explicit but unsupported."""
@@ -59,32 +120,35 @@ class Action(FrozenModel):
     schema_version: str = Field(default="1", pattern=r"^1$")
     kind: ActionKind
     actor_id: str | None = Field(default=None, pattern=r"^e[0-9]{4}$")
-    target_id: str | None = None
+    target_id: str | None = Field(default=None, min_length=1)
     delta_x: int = 0
     delta_y: int = 0
     magnitude: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_structure(self) -> Action:
-        movement = {ActionKind.MOVE, ActionKind.ENTER, ActionKind.EXIT}
-        target_actions = {
-            ActionKind.OPEN,
-            ActionKind.CLOSE,
-            ActionKind.OPEN_GATE,
-            ActionKind.CLOSE_GATE,
-            ActionKind.DETACH,
-            ActionKind.CUT_OR_BREAK,
-            ActionKind.REMOVE_SUPPORT,
-        }
-        if self.kind in movement:
-            if self.target_id is None or not (self.delta_x or self.delta_y):
-                raise ValueError("Movement actions require a target and a non-zero integer delta")
-        elif self.kind in target_actions and self.target_id is None:
-            raise ValueError(f"{self.kind.value} requires target_id")
-        elif self.kind in {ActionKind.WAIT, ActionKind.NOOP} and (
-            self.target_id is not None or self.delta_x or self.delta_y or self.magnitude is not None
-        ):
-            raise ValueError(f"{self.kind.value} accepts no target or numeric parameters")
+        rule = ACTION_PARAMETER_MATRIX[self.kind]
+        present: set[ActionParameter] = set()
+        if self.actor_id is not None:
+            present.add("actor_id")
+        if self.target_id is not None:
+            present.add("target_id")
+        if self.delta_x != 0:
+            present.add("delta_x")
+        if self.delta_y != 0:
+            present.add("delta_y")
+        if self.magnitude is not None:
+            present.add("magnitude")
+        unused = present - rule.allowed
+        if unused:
+            raise ValueError(f"{self.kind.value} rejects unused action fields: {sorted(unused)}")
+        missing = rule.required - present
+        if missing:
+            raise ValueError(f"{self.kind.value} requires action fields: {sorted(missing)}")
+        if rule.exactly_one_axis and (self.delta_x == 0) == (self.delta_y == 0):
+            raise ValueError(f"{self.kind.value} requires exactly one non-zero axis delta")
+        if rule.positive_magnitude and (self.magnitude is None or self.magnitude <= 0):
+            raise ValueError(f"{self.kind.value} requires a positive magnitude")
         return self
 
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
-
 from pydantic import Field
 
 from unfrozen_schemas.config import FrozenModel
@@ -12,17 +10,8 @@ from unfrozen_schemas.envs.schema_world.dynamics import (
     derive_contacts,
     derive_functional_supports,
 )
+from unfrozen_schemas.envs.schema_world.relation_kinds import RelationKind as RelationKind
 from unfrozen_schemas.envs.schema_world.state import Entity, WorldState
-
-
-class RelationKind(StrEnum):
-    INTERIOR = "INTERIOR"
-    EXTERIOR = "EXTERIOR"
-    FUNCTIONAL_SUPPORT = "FUNCTIONAL_SUPPORT"
-    BLOCKAGE = "BLOCKAGE"
-    CONNECTION = "CONNECTION"
-    MOVEMENT = "MOVEMENT"
-    FALLING = "FALLING"
 
 
 class RelationRecord(FrozenModel):

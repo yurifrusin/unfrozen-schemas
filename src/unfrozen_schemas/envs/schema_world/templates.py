@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from unfrozen_schemas.config import FrozenModel
 from unfrozen_schemas.envs.schema_world.actions import Action, ActionKind
@@ -50,16 +50,49 @@ class EpisodePlan(FrozenModel):
     condition_index: int = Field(ge=0, le=1)
     template_id: TemplateFamily
     schema_name: SchemaName
-    environment_version: str
+    environment_version: Literal["schemaworld-core-v1"]
     seed: int = Field(ge=0, le=4_294_967_295)
     noise_seed: int = Field(ge=0, le=4_294_967_295)
     audited_target_factor: str
     declared_difference_paths: tuple[str, ...]
     initial_state: WorldState
-    actions: tuple[Action, ...]
+    actions: tuple[Action, ...] = Field(min_length=1)
     initial_state_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     initial_observation_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     action_sequence_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def validate_embedded_identity(self) -> EpisodePlan:
+        if self.environment_version != self.initial_state.environment_version:
+            raise ValueError("Episode environment version must match its initial state")
+        if self.seed != self.initial_state.seed or self.noise_seed != self.initial_state.noise_seed:
+            raise ValueError("Episode seeds must match its initial state")
+        if self.initial_state.step_index + len(self.actions) > self.initial_state.max_steps:
+            raise ValueError("Episode actions exceed the initial state's remaining horizon")
+        if self.initial_state_hash != canonical_hash(self.initial_state):
+            raise ValueError("Episode initial_state_hash does not match its initial state")
+        if self.initial_observation_hash != canonical_hash(primary_observation(self.initial_state)):
+            raise ValueError(
+                "Episode initial_observation_hash does not match its initial observation"
+            )
+        if self.action_sequence_hash != canonical_hash(self.actions):
+            raise ValueError("Episode action_sequence_hash does not match its actions")
+        return self
+
+
+class PairIdentity(FrozenModel):
+    """Canonical pre-ID payload containing every causally relevant matched-pair input."""
+
+    environment_version: Literal["schemaworld-core-v1"] = "schemaworld-core-v1"
+    template_family: TemplateFamily
+    seed: int = Field(ge=0, le=4_294_967_295)
+    noise_seed: int = Field(ge=0, le=4_294_967_295)
+    gravity_per_step: int = Field(le=0)
+    max_steps: int = Field(gt=0)
+    initial_states: tuple[WorldState, WorldState]
+    actions: tuple[tuple[Action, ...], tuple[Action, ...]]
+    target_factor: str = Field(min_length=1)
+    declared_difference_paths: tuple[str, ...]
 
 
 class MatchedPair(FrozenModel):
@@ -73,36 +106,41 @@ def _stable_id(prefix: str, value: Mapping[str, Any]) -> str:
     return f"{prefix}-{canonical_hash(value)[:16]}"
 
 
+def derive_pair_id(identity: PairIdentity) -> str:
+    """Derive a pair ID without including pair or episode IDs in the hashed payload."""
+
+    return _stable_id("pair", identity.model_dump(mode="json"))
+
+
+def derive_episode_id(identity: PairIdentity, condition_index: int) -> str:
+    """Derive a stable condition-specific episode ID from the same pre-ID identity."""
+
+    return (
+        f"{_stable_id('ep', {'pair_identity': identity, 'condition_index': condition_index})}"
+        f"-{condition_index}"
+    )
+
+
 def _plan(
     *,
-    pair_id: str,
+    identity: PairIdentity,
     condition_index: int,
-    template_id: TemplateFamily,
     schema_name: SchemaName,
-    seed: int,
-    noise_seed: int,
-    target_factor: str,
-    difference_paths: tuple[str, ...],
-    initial_state: WorldState,
-    actions: tuple[Action, ...],
 ) -> EpisodePlan:
-    identity = {
-        "pair_id": pair_id,
-        "condition_index": condition_index,
-        "initial_state": initial_state,
-        "actions": actions,
-    }
+    pair_id = derive_pair_id(identity)
+    initial_state = identity.initial_states[condition_index]
+    actions = identity.actions[condition_index]
     return EpisodePlan(
-        episode_id=f"{_stable_id('ep', identity)}-{condition_index}",
+        episode_id=derive_episode_id(identity, condition_index),
         parent_pair_id=pair_id,
         condition_index=condition_index,
-        template_id=template_id,
+        template_id=identity.template_family,
         schema_name=schema_name,
         environment_version=ENVIRONMENT_VERSION,
-        seed=seed,
-        noise_seed=noise_seed,
-        audited_target_factor=target_factor,
-        declared_difference_paths=difference_paths,
+        seed=identity.seed,
+        noise_seed=identity.noise_seed,
+        audited_target_factor=identity.target_factor,
+        declared_difference_paths=identity.declared_difference_paths,
         initial_state=initial_state,
         actions=actions,
         initial_state_hash=canonical_hash(initial_state),
@@ -135,6 +173,22 @@ def audit_matched_pair(pair: MatchedPair) -> tuple[str, ...]:
     """Require the exact declared leaf differences and no others."""
 
     left, right = pair.episodes
+    if (left.condition_index, right.condition_index) != (0, 1):
+        raise PairParityError(f"Matched pair {pair.pair_id} must use condition order 0, 1")
+    common_fields = (
+        left.template_id == right.template_id
+        and left.schema_name == right.schema_name
+        and left.environment_version == right.environment_version
+        and left.seed == right.seed
+        and left.noise_seed == right.noise_seed
+        and left.audited_target_factor == right.audited_target_factor == pair.target_factor
+        and left.declared_difference_paths
+        == right.declared_difference_paths
+        == pair.declared_difference_paths
+        and left.parent_pair_id == right.parent_pair_id == pair.pair_id
+    )
+    if not common_fields:
+        raise PairParityError(f"Matched pair {pair.pair_id} has inconsistent identity metadata")
     left_payload = _flatten({"initial_state": left.initial_state, "actions": left.actions})
     right_payload = _flatten({"initial_state": right.initial_state, "actions": right.actions})
     all_paths = set(left_payload) | set(right_payload)
@@ -146,6 +200,32 @@ def audit_matched_pair(pair: MatchedPair) -> tuple[str, ...]:
         raise PairParityError(
             f"Matched pair {pair.pair_id} differs outside its declaration: "
             f"declared={declared}, observed={observed}"
+        )
+    identity = PairIdentity(
+        template_family=left.template_id,
+        seed=left.seed,
+        noise_seed=left.noise_seed,
+        gravity_per_step=left.initial_state.gravity_per_step,
+        max_steps=left.initial_state.max_steps,
+        initial_states=(left.initial_state, right.initial_state),
+        actions=(left.actions, right.actions),
+        target_factor=pair.target_factor,
+        declared_difference_paths=pair.declared_difference_paths,
+    )
+    expected_pair_id = derive_pair_id(identity)
+    if pair.pair_id != expected_pair_id:
+        raise PairParityError(
+            f"Matched pair ID mismatch: expected {expected_pair_id}, observed {pair.pair_id}"
+        )
+    expected_episode_ids = (
+        derive_episode_id(identity, 0),
+        derive_episode_id(identity, 1),
+    )
+    observed_episode_ids = (left.episode_id, right.episode_id)
+    if observed_episode_ids != expected_episode_ids:
+        raise PairParityError(
+            "Matched episode ID mismatch: "
+            f"expected={expected_episode_ids}, observed={observed_episode_ids}"
         )
     return observed
 
@@ -206,37 +286,32 @@ def _containment_pair(seed: int, noise_seed: int, gravity: int, max_steps: int) 
     actions = (Action(kind=ActionKind.EXIT, target_id="e0001", delta_x=300),)
     target_factor = "right aperture enabled before identical planned exit"
     differences = ("initial_state.openings.0.enabled",)
-    pair_id = _stable_id(
-        "pair", {"template": TemplateFamily.CONTAINMENT_GATE, "seed": seed, "noise": noise_seed}
+    identity = PairIdentity(
+        template_family=TemplateFamily.CONTAINMENT_GATE,
+        seed=seed,
+        noise_seed=noise_seed,
+        gravity_per_step=gravity,
+        max_steps=max_steps,
+        initial_states=(closed_state, open_state),
+        actions=(actions, actions),
+        target_factor=target_factor,
+        declared_difference_paths=differences,
     )
+    pair_id = derive_pair_id(identity)
     pair = MatchedPair(
         pair_id=pair_id,
         target_factor=target_factor,
         declared_difference_paths=differences,
         episodes=(
             _plan(
-                pair_id=pair_id,
+                identity=identity,
                 condition_index=0,
-                template_id=TemplateFamily.CONTAINMENT_GATE,
                 schema_name=SchemaName.CONTAINMENT,
-                seed=seed,
-                noise_seed=noise_seed,
-                target_factor=target_factor,
-                difference_paths=differences,
-                initial_state=closed_state,
-                actions=actions,
             ),
             _plan(
-                pair_id=pair_id,
+                identity=identity,
                 condition_index=1,
-                template_id=TemplateFamily.CONTAINMENT_GATE,
                 schema_name=SchemaName.CONTAINMENT,
-                seed=seed,
-                noise_seed=noise_seed,
-                target_factor=target_factor,
-                difference_paths=differences,
-                initial_state=open_state,
-                actions=actions,
             ),
         ),
     )
@@ -290,36 +365,32 @@ def _action_pair(
     target_factor: str,
 ) -> MatchedPair:
     differences = ("actions.0.kind", "actions.0.target_id")
-    pair_id = _stable_id("pair", {"template": template_id, "seed": seed, "noise": noise_seed})
-    del gravity, max_steps
+    identity = PairIdentity(
+        template_family=template_id,
+        seed=seed,
+        noise_seed=noise_seed,
+        gravity_per_step=gravity,
+        max_steps=max_steps,
+        initial_states=(state, state),
+        actions=((left_action,), (right_action,)),
+        target_factor=target_factor,
+        declared_difference_paths=differences,
+    )
+    pair_id = derive_pair_id(identity)
     pair = MatchedPair(
         pair_id=pair_id,
         target_factor=target_factor,
         declared_difference_paths=differences,
         episodes=(
             _plan(
-                pair_id=pair_id,
+                identity=identity,
                 condition_index=0,
-                template_id=template_id,
                 schema_name=SchemaName.SUPPORT,
-                seed=seed,
-                noise_seed=noise_seed,
-                target_factor=target_factor,
-                difference_paths=differences,
-                initial_state=state,
-                actions=(left_action,),
             ),
             _plan(
-                pair_id=pair_id,
+                identity=identity,
                 condition_index=1,
-                template_id=template_id,
                 schema_name=SchemaName.SUPPORT,
-                seed=seed,
-                noise_seed=noise_seed,
-                target_factor=target_factor,
-                difference_paths=differences,
-                initial_state=state,
-                actions=(right_action,),
             ),
         ),
     )
@@ -364,7 +435,7 @@ def _tension_pair(seed: int, noise_seed: int, gravity: int, max_steps: int) -> M
                 tether_id="t0001",
                 object_id="e0001",
                 anchor_id="e0003",
-                max_length=400,
+                length=350,
             ),
         ),
     )

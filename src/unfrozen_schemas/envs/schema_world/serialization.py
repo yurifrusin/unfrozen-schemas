@@ -11,22 +11,25 @@ from typing import Any, Final, Literal
 from pydantic import BaseModel, Field
 
 from unfrozen_schemas.config import FrozenModel
-from unfrozen_schemas.envs.schema_world.state import EntityRole, WorldState
-
-FORBIDDEN_RELATION_LABELS: Final[frozenset[str]] = frozenset(
-    {
-        "INSIDE",
-        "OUTSIDE",
-        "SUPPORTED",
-        "UNSUPPORTED",
-        "BLOCKED",
-        "CONNECTED",
-        "CONTAINMENT",
-        "SUPPORT",
-    }
+from unfrozen_schemas.envs.schema_world.relation_kinds import (
+    FORBIDDEN_RELATION_LABELS as FORBIDDEN_RELATION_LABELS,
 )
+from unfrozen_schemas.envs.schema_world.state import BoundarySide, EntityRole, WorldState
+
 ENTITY_KIND_CODES: Final[dict[EntityRole, int]] = {
-    role: index for index, role in enumerate(EntityRole, start=1)
+    EntityRole.AGENT: 1,
+    EntityRole.OBJECT: 2,
+    EntityRole.CONTAINER: 3,
+    EntityRole.GATE: 4,
+    EntityRole.SUPPORT: 5,
+    EntityRole.ANCHOR: 6,
+    EntityRole.DISTRACTOR: 7,
+}
+BOUNDARY_SIDE_CODES: Final[dict[BoundarySide, int]] = {
+    BoundarySide.LEFT: 1,
+    BoundarySide.RIGHT: 2,
+    BoundarySide.BOTTOM: 3,
+    BoundarySide.TOP: 4,
 }
 
 
@@ -67,7 +70,7 @@ class ObservedEdge(FrozenModel):
     endpoint_b: str
     mechanism_code: Literal[1, 2]
     active: bool
-    max_length: int | None
+    length: int | None
 
 
 class PrimaryObservation(FrozenModel):
@@ -109,7 +112,6 @@ def canonical_hash(value: BaseModel | Mapping[str, Any] | Sequence[Any]) -> str:
 
 
 def primary_observation(state: WorldState) -> PrimaryObservation:
-    side_codes = {"left": 1, "right": 2, "bottom": 3, "top": 4}
     observation = PrimaryObservation(
         environment_version=state.environment_version,
         coordinate_unit=state.coordinate_unit,
@@ -144,7 +146,7 @@ def primary_observation(state: WorldState) -> PrimaryObservation:
             ObservedAperture(
                 aperture_id=opening.opening_id,
                 boundary_id=opening.boundary_id,
-                side_code=side_codes[opening.side.value],
+                side_code=BOUNDARY_SIDE_CODES[opening.side],
                 span_start=opening.span_start,
                 span_end=opening.span_end,
                 enabled=opening.enabled,
@@ -159,7 +161,7 @@ def primary_observation(state: WorldState) -> PrimaryObservation:
                     endpoint_b=item.anchor_id,
                     mechanism_code=1,
                     active=item.active,
-                    max_length=None,
+                    length=None,
                 )
                 for item in state.attachments
             ]
@@ -170,7 +172,7 @@ def primary_observation(state: WorldState) -> PrimaryObservation:
                     endpoint_b=item.anchor_id,
                     mechanism_code=2,
                     active=item.active,
-                    max_length=item.max_length,
+                    length=item.length,
                 )
                 for item in state.tethers
             ]
