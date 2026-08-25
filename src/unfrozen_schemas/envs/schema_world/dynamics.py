@@ -138,13 +138,21 @@ def _crossed_sides(
 ) -> tuple[BoundarySide, ...]:
     left, right, bottom, top = bounds
     sides: list[BoundarySide] = []
-    if before.x >= left and proposed.x < left:
+    if (before.x >= left and proposed.x < left) or (
+        before.x + before.width <= left and proposed.x + proposed.width > left
+    ):
         sides.append(BoundarySide.LEFT)
-    if before.x + before.width <= right and proposed.x + proposed.width > right:
+    if (before.x + before.width <= right and proposed.x + proposed.width > right) or (
+        before.x >= right and proposed.x < right
+    ):
         sides.append(BoundarySide.RIGHT)
-    if before.y >= bottom and proposed.y < bottom:
+    if (before.y >= bottom and proposed.y < bottom) or (
+        before.y + before.height <= bottom and proposed.y + proposed.height > bottom
+    ):
         sides.append(BoundarySide.BOTTOM)
-    if before.y + before.height <= top and proposed.y + proposed.height > top:
+    if (before.y + before.height <= top and proposed.y + proposed.height > top) or (
+        before.y >= top and proposed.y < top
+    ):
         sides.append(BoundarySide.TOP)
     return tuple(sides)
 

@@ -15,6 +15,7 @@ from unfrozen_schemas.envs.schema_world.events import (
     DelayedEventKind,
 )
 from unfrozen_schemas.envs.schema_world.state import (
+    Attachment,
     Boundary,
     BoundarySide,
     Entity,
@@ -160,6 +161,29 @@ def test_open_boundary_allows_exit_without_an_enabled_aperture() -> None:
     assert result.state.entity("e0001").x == 1000
 
 
+def test_entry_and_open_action_use_the_same_exact_aperture_contract() -> None:
+    base = _containment_state()
+    outside = base.entities[0].model_copy(update={"x": 1000})
+    outside_state = base.model_copy(update={"entities": (outside, *base.entities[1:])})
+    entry = Action(kind=ActionKind.ENTER, target_id="e0001", delta_x=-300)
+    blocked = transition(outside_state, entry)
+    assert blocked.state.entity("e0001").x == 1000
+    assert blocked.trace.blocked_by == ("b0001",)
+
+    opened = transition(base, Action(kind=ActionKind.OPEN_GATE, target_id="o0001"))
+    exited = transition(
+        opened.state,
+        Action(kind=ActionKind.EXIT, target_id="e0001", delta_x=300),
+    )
+    assert exited.state.entity("e0001").x == 1000
+
+    enabled_outside = outside_state.model_copy(
+        update={"openings": (outside_state.openings[0].model_copy(update={"enabled": True}),)}
+    )
+    entered = transition(enabled_outside, entry)
+    assert entered.state.entity("e0001").x == 700
+
+
 def test_lower_surface_is_functional_but_side_contact_does_not_prevent_falling() -> None:
     stable = transition(_support_state(), Action(kind=ActionKind.NOOP))
     assert stable.state.entity("e0001").y == 500
@@ -193,6 +217,38 @@ def test_tension_support_survives_platform_removal_then_detach_causes_fall() -> 
     detached = transition(held.state, Action(kind=ActionKind.DETACH, target_id="t0001"))
     assert detached.state.entity("e0001").y == 400
     assert detached.trace.falling_entities == ("e0001",)
+
+
+def test_direct_attachment_is_functional_support_until_detached() -> None:
+    base = _support_state(platform_active=False)
+    state = base.model_copy(
+        update={
+            "attachments": (
+                Attachment(
+                    attachment_id="a0001",
+                    object_id="e0001",
+                    anchor_id="e0003",
+                ),
+            )
+        }
+    )
+    held = transition(state, Action(kind=ActionKind.NOOP))
+    assert held.state.entity("e0001").y == 500
+    assert held.trace.functional_supports[0].kind is SupportKind.ATTACHMENT
+    fallen = transition(held.state, Action(kind=ActionKind.DETACH, target_id="a0001"))
+    assert fallen.state.entity("e0001").y == 400
+
+
+def test_superficially_similar_exterior_parallel_motion_is_not_blocked() -> None:
+    base = _containment_state()
+    outside = base.entities[0].model_copy(update={"x": 1000})
+    state = base.model_copy(update={"entities": (outside, *base.entities[1:])})
+    result = transition(
+        state,
+        Action(kind=ActionKind.MOVE, target_id="e0001", delta_y=100),
+    )
+    assert result.state.entity("e0001").y == 500
+    assert result.trace.blocked_by == ()
 
 
 def test_delayed_event_priority_is_stable_and_effect_begins_next_step() -> None:

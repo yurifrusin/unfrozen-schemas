@@ -42,6 +42,9 @@ class Entity(FrozenModel):
     y: int = Field(ge=COORDINATE_MIN, le=COORDINATE_MAX)
     width: int = Field(gt=0, le=COORDINATE_MAX)
     height: int = Field(gt=0, le=COORDINATE_MAX)
+    orientation_quarter_turns: int = Field(default=0, ge=0, le=3)
+    gripper_closed: bool = False
+    mass_class: int = Field(default=1, ge=1)
     velocity_x: int = 0
     velocity_y: int = 0
     active: bool = True

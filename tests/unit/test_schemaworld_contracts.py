@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from unfrozen_schemas.envs.schema_world.actions import Action, ActionKind, validate_action
+from unfrozen_schemas.envs.schema_world.environment import SchemaWorld
 from unfrozen_schemas.envs.schema_world.events import DelayedEvent, DelayedEventKind
 from unfrozen_schemas.envs.schema_world.protocol import IllegalActionError, UnsupportedActionError
 from unfrozen_schemas.envs.schema_world.rng import DeterministicGenerator
@@ -23,6 +24,7 @@ from unfrozen_schemas.envs.schema_world.state import (
     Opening,
     WorldState,
 )
+from unfrozen_schemas.envs.schema_world.templates import TemplateFamily
 
 
 def _state() -> WorldState:
@@ -152,3 +154,15 @@ def test_canonical_hash_ignores_mapping_insertion_order() -> None:
     right = {"a": 1, "b": [2, 3]}
     assert canonical_record_bytes(left) == b'{"a":1,"b":[2,3]}\n'
     assert canonical_hash(left) == canonical_hash(right)
+
+
+def test_gymnasium_style_reset_and_step_are_typed_and_deterministic() -> None:
+    environment = SchemaWorld(TemplateFamily.CONTAINMENT_GATE, condition_index=0, max_steps=1)
+    left = environment.reset(seed=17, noise_seed=18)
+    right = environment.reset(seed=17, noise_seed=18)
+    assert left == right
+    result = environment.step(Action(kind=ActionKind.NOOP))
+    assert result.reward == 0
+    assert result.terminated is False
+    assert result.truncated is True
+    assert result.privileged_state.terminated is True

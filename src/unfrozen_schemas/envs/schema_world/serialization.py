@@ -37,6 +37,9 @@ class ObservedEntity(FrozenModel):
     y: int
     width: int
     height: int
+    orientation_quarter_turns: int
+    gripper_closed: bool
+    mass_class: int
     velocity_x: int
     velocity_y: int
     active: bool
@@ -119,6 +122,9 @@ def primary_observation(state: WorldState) -> PrimaryObservation:
                 y=entity.y,
                 width=entity.width,
                 height=entity.height,
+                orientation_quarter_turns=entity.orientation_quarter_turns,
+                gripper_closed=entity.gripper_closed,
+                mass_class=entity.mass_class,
                 velocity_x=entity.velocity_x,
                 velocity_y=entity.velocity_y,
                 active=entity.active,
