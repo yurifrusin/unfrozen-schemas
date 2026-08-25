@@ -7,7 +7,7 @@
 - Tag: `milestone-0-complete`
 - Canonical implementation merge commit: `98e4a932cff37351efcf6873702aeb5c904fe53e`
 - Implementation pull request: `https://github.com/yurifrusin/unfrozen-schemas/pull/1`
-- Linked closeout pull request: `<fill from the mechanically constrained closeout pull request>`
+- Linked closeout pull request: `https://github.com/yurifrusin/unfrozen-schemas/pull/2`
 - Release date: `2026-08-25`
 - Release URL: `https://github.com/yurifrusin/unfrozen-schemas/releases/tag/milestone-0-complete`
 - Revision 6 `CODEX_SPEC.md` SHA-256: `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`
