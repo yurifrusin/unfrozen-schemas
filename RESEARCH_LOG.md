@@ -93,6 +93,28 @@ must satisfy the existing aperture contract. This narrows the implementation to 
 rectangular apparatus without changing templates, actions, experimental conditions, or pinned
 scientific identities.
 
+## 2026-08-25 — Milestone 1 closes as apparatus, not a learning result
+
+Canonical Milestone 1 closeout fixes the scientific identity of the minimal deterministic
+SchemaWorld Core apparatus before benchmark construction or model work begins. The completed M1.1–
+M1.5 scope establishes exact integer state, action, tether, finite-wall, relation, matched-pair,
+opaque-codec, persistence, validation, replay, and rendering contracts for CONTAINMENT and SUPPORT.
+
+The exact taut-tether and finite-wall corrections are retained as causal-validity clarifications.
+They ensure that apparent support requires a physically active declared mechanism and that
+containment blockage is caused by a finite wall actually intersected by the swept body. Canonical
+pair and episode identities cover every causal pre-ID input, and the independent verifier recomputes
+transitions and identities instead of trusting generated rows or replay assertions.
+
+This release is deterministic experimental apparatus only. It contains no benchmark, language
+model, tokenizer change, treatment, training, GPU execution, L1–L4 measurement, or Phase I gate
+evidence, and it makes no empirical claim that an LLM acquires or transfers an image schema.
+Repository and documentation licensing remain unresolved.
+
+After the linked documentation closeout is merged and `milestone-1-complete` is tagged and released
+from canonical `main`, governance authorises Milestone 2 as the next engineering milestone. That
+authorisation does not begin Milestone 2, and no Milestone 2 work occurred during this closeout.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>
