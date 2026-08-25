@@ -9,7 +9,7 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 
-from unfrozen_schemas.config import ConfigLoadError, load_smoke_config
+from unfrozen_schemas.config import ConfigLoadError, find_repository_root, load_smoke_config
 from unfrozen_schemas.core_config import load_core_config
 from unfrozen_schemas.data.core_models import CoreRunError
 from unfrozen_schemas.data.core_runner import (
@@ -20,6 +20,19 @@ from unfrozen_schemas.data.core_runner import (
 )
 from unfrozen_schemas.data.core_runner import (
     inspect_episode as inspect_core_episode,
+)
+from unfrozen_schemas.evaluation.benchmark_lifecycle import (
+    build_benchmark,
+    create_engineering_freeze_approval,
+    freeze_benchmark,
+)
+from unfrozen_schemas.evaluation.benchmark_models import (
+    BenchmarkOperationError,
+    BenchmarkPurpose,
+)
+from unfrozen_schemas.evaluation.benchmark_validation import (
+    audit_tracked_benchmark_paths,
+    validate_benchmark_manifest,
 )
 from unfrozen_schemas.provenance import BootstrapFailureRecord, RunManifest
 from unfrozen_schemas.smoke import SmokeRunError, run_smoke
@@ -34,6 +47,16 @@ app = typer.Typer(
 
 DEFAULT_SMOKE_CONFIG = Path("configs/experiment/smoke.yaml")
 DEFAULT_CORE_CONFIG = Path("configs/experiment/milestone1_core_smoke.yaml")
+
+
+def _resolve_benchmark_manifest(version: str) -> Path:
+    private = Path("benchmarks/private") / version / "candidate_manifest.json"
+    frozen = Path("benchmarks/frozen") / version / "frozen_manifest.json"
+    if frozen.is_file():
+        return frozen
+    if private.is_file():
+        return private
+    raise ValueError(f"Version {version!r} has no private or frozen manifest")
 
 
 def _report_configuration_error(exc: Exception) -> None:
@@ -299,6 +322,217 @@ def inspect_episode_command(
         typer.echo(f"Episode inspection failed: {type(exc).__name__}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(json.dumps(summary, sort_keys=True, separators=(",", ":")))
+
+
+@app.command("build-benchmark")
+def build_benchmark_command(
+    source: Annotated[
+        Path,
+        typer.Option(
+            "--source",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            help="Directory containing the one supported source_manifest.json + items.jsonl form.",
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", file_okay=False, help="New PRIVATE candidate destination."),
+    ],
+    version: Annotated[
+        str, typer.Option("--version", help="Immutable benchmark version identity.")
+    ],
+    purpose: Annotated[
+        BenchmarkPurpose,
+        typer.Option("--purpose", case_sensitive=False, help="Quarantined benchmark purpose."),
+    ],
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Validate and derive logical identities without writes."),
+    ] = False,
+) -> None:
+    """Build a deterministic answer-isolated PRIVATE benchmark candidate."""
+
+    try:
+        result = build_benchmark(
+            source_directory=source,
+            output_directory=output,
+            version=version,
+            purpose=purpose,
+            dry_run=dry_run,
+        )
+    except BenchmarkOperationError as exc:
+        typer.echo(f"Benchmark build failed: {exc}", err=True)
+        if exc.failure_record_path:
+            typer.echo(f"Governed failure record: {exc.failure_record_path}", err=True)
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        typer.echo(f"Benchmark build preflight failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(result.model_dump(mode="json"), sort_keys=True, separators=(",", ":")))
+
+
+@app.command("validate-benchmark")
+def validate_benchmark_command(
+    manifest: Annotated[
+        Path | None,
+        typer.Option(
+            "--manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="PRIVATE candidate or FROZEN manifest.",
+        ),
+    ] = None,
+    version: Annotated[
+        str | None,
+        typer.Option("--version", help="Resolve under benchmarks/private or benchmarks/frozen."),
+    ] = None,
+    against_manifest: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--against-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="Additional manifest to enforce cross-purpose ID/content disjointness.",
+        ),
+    ] = None,
+) -> None:
+    """Independently reconstruct benchmark schemas, hashes, partitions, and provenance."""
+
+    try:
+        if (manifest is None) == (version is None):
+            raise ValueError("Provide exactly one of --manifest or --version")
+        selected = manifest if manifest is not None else _resolve_benchmark_manifest(str(version))
+        validated = validate_benchmark_manifest(
+            selected, against_manifests=tuple(against_manifest or ())
+        )
+    except Exception as exc:
+        typer.echo(f"Benchmark validation failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        f"Benchmark valid: {validated.benchmark_version}; {validated.lifecycle_state.value}; "
+        f"purpose={validated.purpose.value}; items={validated.item_count}"
+    )
+
+
+@app.command("create-engineering-freeze-approval")
+def create_engineering_freeze_approval_command(
+    candidate_manifest: Annotated[
+        Path,
+        typer.Option(
+            "--candidate-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", dir_okay=False, help="New engineering approval JSON path."),
+    ],
+    signer: Annotated[
+        str, typer.Option("--signer", help="Non-empty engineering fixture signer/reference.")
+    ],
+) -> None:
+    """Create an exact-hash approval usable only by the tracked engineering fixture."""
+
+    try:
+        approval = create_engineering_freeze_approval(
+            candidate_manifest_path=candidate_manifest,
+            output_path=output,
+            signer=signer,
+        )
+    except Exception as exc:
+        typer.echo(f"Engineering approval failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(approval.model_dump(mode="json"), sort_keys=True, separators=(",", ":")))
+
+
+@app.command("freeze-benchmark")
+def freeze_benchmark_command(
+    approval: Annotated[
+        Path,
+        typer.Option(
+            "--approval",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="Exact-hash freeze approval JSON.",
+        ),
+    ],
+    candidate_manifest: Annotated[
+        Path | None,
+        typer.Option(
+            "--candidate-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = None,
+    version: Annotated[
+        str | None,
+        typer.Option("--version", help="Resolve candidate under benchmarks/private/<version>."),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", file_okay=False, help="New write-once FROZEN destination."),
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Validate candidate and approval without writes.")
+    ] = False,
+) -> None:
+    """Freeze one validated PRIVATE candidate through an exact approval artifact."""
+
+    try:
+        if (candidate_manifest is None) == (version is None):
+            raise ValueError("Provide exactly one of --candidate-manifest or --version")
+        selected = (
+            candidate_manifest
+            if candidate_manifest is not None
+            else Path("benchmarks/private") / str(version) / "candidate_manifest.json"
+        )
+        if not selected.is_file():
+            raise ValueError(f"Candidate manifest does not exist: {selected}")
+        if output is None and version is None:
+            raise ValueError("--output is required when --candidate-manifest is used")
+        destination = output or (Path("benchmarks/frozen") / str(version))
+        result = freeze_benchmark(
+            candidate_manifest_path=selected,
+            approval_path=approval,
+            output_directory=destination,
+            dry_run=dry_run,
+        )
+    except BenchmarkOperationError as exc:
+        typer.echo(f"Benchmark freeze failed: {exc}", err=True)
+        if exc.failure_record_path:
+            typer.echo(f"Governed failure record: {exc.failure_record_path}", err=True)
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        typer.echo(f"Benchmark freeze preflight failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(result.model_dump(mode="json"), sort_keys=True, separators=(",", ":")))
+
+
+@app.command("audit-benchmark-git")
+def audit_benchmark_git_command() -> None:
+    """Reject tracked private, answer-bearing, selection, or v1_core benchmark content."""
+
+    try:
+        root = find_repository_root(Path.cwd())
+        tracked = audit_tracked_benchmark_paths(root)
+    except Exception as exc:
+        typer.echo(f"Benchmark Git audit failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Benchmark Git audit passed: {len(tracked)} tracked safe path(s)")
 
 
 if __name__ == "__main__":
