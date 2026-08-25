@@ -41,6 +41,19 @@ uv run pytest
 uv run unfrozen smoke
 ```
 
+SchemaWorld Core engineering smoke and replay:
+
+```powershell
+uv run unfrozen generate-core --config configs/experiment/milestone1_core_smoke.yaml
+uv run unfrozen validate-core --manifest <core_manifest.json>
+uv run unfrozen replay-core --manifest <core_manifest.json>
+uv run unfrozen inspect-episode --episode-id <episode-id> --manifest <core_manifest.json> --render
+```
+
+The M1 path is CPU-only, offline, and engineering-only. Its exact operational contract, dependency
+licences, serialization boundaries, and hashing rules are documented in `docs/schemaworld-core.md`.
+Generated runs remain under ignored output storage and are not scientific LLM results.
+
 The Milestone 0 smoke path is CPU-only, secret-free, download-free, and offline at execution time.
 
 ## Canonical GitHub workflow

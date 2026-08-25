@@ -51,6 +51,23 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Repository and documentation licensing remain unresolved.
 - Advancement decision: Milestone 0 is complete only after the linked closeout record is merged and that tag and release are published from canonical `main`; Milestone 1 is then authorised but is not begun by this closeout.
 
+### Main protection and Milestone 1 branch start
+
+- Canonical branch point: `a1712c7d6229fd90c5619414fc13fa1a21a4cd22`, equal to local
+  `main`, `origin/main`, and the target of `milestone-0-complete` at task preflight.
+- Repository ruleset `21295385` was activated specifically for `refs/heads/main` after its initial
+  empty branch target was found ineffective.
+- Effective rules require pull requests, the strict/up-to-date `cpu` check from GitHub Actions app
+  ID `15368`, zero approving reviews, and resolved review conversations; they prohibit branch
+  deletion and non-fast-forward pushes.
+- CODEOWNERS review, signed commits, linear history, merge queue, and automatic merging are not
+  required. Repository administrators retain a bypass for exceptional recovery, not routine
+  milestone work.
+- Milestone 1 branch started as `codex/milestone-1-schemaworld-core` from the exact canonical branch
+  point above.
+- Status: Milestone 1 implementation is in progress and is not a completed, merged, tagged, or
+  released milestone.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>
