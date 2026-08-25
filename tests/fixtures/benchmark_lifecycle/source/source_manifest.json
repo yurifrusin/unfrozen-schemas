@@ -1,0 +1,17 @@
+{
+  "schema_version": "1",
+  "manifest_kind": "benchmark_source",
+  "lifecycle_state": "SOURCE",
+  "source_format": "canonical-jsonl-v1",
+  "benchmark_version": "engineering-benchmark-lifecycle-v1",
+  "purpose": "engineering",
+  "engineering_only": true,
+  "scientific_eligible": false,
+  "promotable": false,
+  "items_file": "items.jsonl",
+  "expected_item_count": 2,
+  "rights_determination_reference": "not-applicable:engineering-fixture",
+  "human_validation_reference": "not-applicable:engineering-fixture",
+  "ethics_determination_reference": "not-applicable:engineering-fixture",
+  "production_prerequisites": null
+}
