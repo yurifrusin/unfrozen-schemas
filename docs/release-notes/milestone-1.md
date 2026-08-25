@@ -12,7 +12,7 @@
 - Owner-approved implementation head: `e6e6d81128ff619679539ba99cb8545adbd84e8e`
 - Canonical implementation merge commit and closeout branch point:
   `cff2840db09dd0dcf3a37b7c42b58aac9cf5e105`
-- Linked closeout pull request: `PENDING_LINKED_CLOSEOUT_PR`
+- Linked closeout pull request: `https://github.com/yurifrusin/unfrozen-schemas/pull/4`
 - Release date: `2026-08-25`
 - Release URL: `https://github.com/yurifrusin/unfrozen-schemas/releases/tag/milestone-1-complete`
 - Revision 6 `CODEX_SPEC.md` SHA-256:

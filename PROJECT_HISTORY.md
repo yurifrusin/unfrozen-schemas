@@ -112,7 +112,7 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
   `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`.
 - The linked documentation-only closeout branch is `codex/milestone-1-closeout`, created from exact
   branch point `cff2840db09dd0dcf3a37b7c42b58aac9cf5e105`; linked closeout pull request:
-  `PENDING_LINKED_CLOSEOUT_PR`.
+  `https://github.com/yurifrusin/unfrozen-schemas/pull/4`.
 - Final Windows verification passed Ruff lint and formatting, strict mypy over 40 source/test files,
   all 161 pytest tests on Python 3.11.7, Milestone 0 offline smoke, 12-episode/6-pair Core
   generation, independent source validation, complete replay, independent replay validation, and
