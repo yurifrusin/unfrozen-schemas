@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from enum import Enum
 from typing import Any, Final, Literal
 
 from pydantic import BaseModel, Field
@@ -79,15 +80,22 @@ class PrimaryObservation(FrozenModel):
     edges: tuple[ObservedEdge, ...]
 
 
+def _logical_data(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return _logical_data(value.model_dump(mode="json"))
+    if isinstance(value, Mapping):
+        return {str(key): _logical_data(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_logical_data(item) for item in value]
+    if isinstance(value, Enum):
+        return value.value
+    return value
+
+
 def canonical_record_bytes(value: BaseModel | Mapping[str, Any] | Sequence[Any]) -> bytes:
     """Return stable logical JSON without paths, timestamps, or writer metadata."""
 
-    if isinstance(value, BaseModel):
-        data: Any = value.model_dump(mode="json")
-    elif isinstance(value, Mapping):
-        data = dict(value)
-    else:
-        data = list(value)
+    data = _logical_data(value)
     return (
         json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
     ).encode("utf-8")
