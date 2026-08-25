@@ -79,6 +79,20 @@ corrections to the deterministic causal apparatus, not new hypotheses, benchmark
 conditions, or scientific findings. They preserve condition comparability by making the intended
 causal distinction explicit before release.
 
+## 2026-08-25 — Containment walls are finite geometric segments
+
+Final pre-release review found that movement-axis plane crossing alone implicitly extended each
+container wall infinitely along its orthogonal axis. That artifact could make a distant container
+block motion occurring entirely above, below, left, or right of it.
+
+SchemaWorld Core now treats a wall crossing as the conjunction of two exact integer conditions: the
+swept movement interval intersects the relevant inset wall plane, and the moving body's fixed
+orthogonal interval positively overlaps the container's finite outer orthogonal interval. Zero-width
+tangential contact is non-colliding, while a one-microunit overlap remains collision-relevant and
+must satisfy the existing aperture contract. This narrows the implementation to the intended finite
+rectangular apparatus without changing templates, actions, experimental conditions, or pinned
+scientific identities.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>

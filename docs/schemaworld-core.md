@@ -167,15 +167,22 @@ movable body lies wholly inside that inset rectangle; otherwise `EXTERIOR` is de
 `ENTER`, and `EXIT` are axis-aligned only; diagonal actions are malformed and rejected before a
 transition.
 
-For a prospective movement, the verifier forms the exact axis-aligned swept rectangle. On the
-movement axis it tests the open interval from the minimum starting/proposed lower edge to the maximum
-starting/proposed upper edge against every left/right or bottom/top interior boundary plane of every
-closed container. Every intersected plane is a crossing, including both planes in an
-outside-to-outside leap and a plane already partially intersecting the starting rectangle. Each
-crossing requires an enabled opening on that exact side whose inclusive span contains the complete
-orthogonal object extent at the crossing. Missing, undersized, or misaligned apertures leave the body
-unchanged and produce privileged blockage evidence. A boundary with `closed=false` is open along its
-whole perimeter and imposes no crossing check. World bounds remain mandatory.
+For a prospective movement, the verifier forms the exact axis-aligned swept rectangle and intersects
+it with finite rectangular walls. A horizontal movement can intersect a left/right wall only when
+the body's fixed y-interval has positive integer overlap with the container's finite outer
+y-interval; a vertical movement analogously requires positive overlap between the fixed x-interval
+and the container's finite outer x-interval before a bottom/top wall can be crossed. Exact tangential
+contact at an outer extent has zero overlap and is not a collision. Once that orthogonal overlap is
+positive, the verifier tests the open swept interval on the movement axis, from the minimum
+starting/proposed lower edge to the maximum starting/proposed upper edge, against the corresponding
+interior boundary planes. Every intersected finite wall segment is a crossing, including both sides
+in an outside-to-outside leap and a side already partially intersecting the starting rectangle.
+Each crossing requires an enabled opening on that exact side whose inclusive span contains the
+complete orthogonal object extent at the crossing. Positive overlap by even one microunit in a wall
+or corner region therefore remains blocked unless such an aperture fits. Missing, undersized, or
+misaligned apertures leave the body unchanged and produce privileged blockage evidence. A boundary
+with `closed=false` is open along its whole perimeter and imposes no crossing check. World bounds
+remain mandatory.
 
 Touching without penetration uses exact open-interval semantics: a body touching a plane and moving
 away does not cross it; moving through it does. A partially overlapping starting body is fail-closed

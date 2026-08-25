@@ -81,6 +81,19 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Status: correction work remains on the open implementation pull request and is not merged, tagged,
   released, scientifically frozen, or a completed milestone.
 
+### Milestone 1 finite-wall containment correction
+
+- Continued on `codex/milestone-1-schemaworld-core` and pull request
+  `https://github.com/yurifrusin/unfrozen-schemas/pull/3` from pre-correction head
+  `4d2c14a8bd1b40eddf3319cbb357f872270618d3`.
+- Constrained swept containment checks to finite rectangular wall extents: a movement-axis plane is
+  relevant only when the object's fixed orthogonal interval positively overlaps the container's
+  outer orthogonal interval; exact tangency remains non-colliding.
+- The tracked template states and actions remain unchanged, and all five pinned pair, opaque-codec,
+  and raw-render regression identities remain unchanged.
+- Status: the correction remains on the open implementation pull request and is not merged, tagged,
+  released, scientifically frozen, or a completed milestone.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

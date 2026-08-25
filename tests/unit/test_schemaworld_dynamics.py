@@ -224,6 +224,121 @@ def _tunnelling_state(
     )
 
 
+def _finite_wall_state(*, object_x: int, object_y: int, closed: bool = True) -> WorldState:
+    return WorldState(
+        gravity_per_step=-100,
+        seed=1,
+        noise_seed=2,
+        step_index=0,
+        max_steps=5,
+        entities=(
+            Entity(
+                entity_id="e0001",
+                role=EntityRole.OBJECT,
+                x=object_x,
+                y=object_y,
+                width=100,
+                height=100,
+                movable=True,
+            ),
+            Entity(
+                entity_id="e0002",
+                role=EntityRole.CONTAINER,
+                x=300,
+                y=300,
+                width=800,
+                height=800,
+            ),
+        ),
+        boundaries=(
+            Boundary(
+                boundary_id="b0001",
+                container_id="e0002",
+                thickness=20,
+                closed=closed,
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("object_x", "object_y", "delta_x", "delta_y"),
+    [
+        (100, 1200, 1100, 0),  # wholly above
+        (100, 100, 1100, 0),  # wholly below
+        (100, 100, 0, 1100),  # wholly left
+        (1200, 100, 0, 1100),  # wholly right
+    ],
+)
+def test_sweep_outside_finite_orthogonal_wall_extent_is_not_blocked(
+    object_x: int, object_y: int, delta_x: int, delta_y: int
+) -> None:
+    result = transition(
+        _finite_wall_state(object_x=object_x, object_y=object_y),
+        Action(
+            kind=ActionKind.MOVE,
+            target_id="e0001",
+            delta_x=delta_x,
+            delta_y=delta_y,
+        ),
+    )
+    moved = result.state.entity("e0001")
+    assert (moved.x, moved.y) == (object_x + delta_x, object_y + delta_y)
+    assert result.trace.blocked_by == ()
+
+
+@pytest.mark.parametrize(
+    ("object_x", "object_y", "delta_x", "delta_y"),
+    [
+        (100, 1100, 1100, 0),  # touches outer top extent
+        (100, 200, 1100, 0),  # touches outer bottom extent
+        (200, 100, 0, 1100),  # touches outer left extent
+        (1100, 100, 0, 1100),  # touches outer right extent
+    ],
+)
+def test_tangential_sweep_at_outer_container_extent_is_not_blocked(
+    object_x: int, object_y: int, delta_x: int, delta_y: int
+) -> None:
+    result = transition(
+        _finite_wall_state(object_x=object_x, object_y=object_y),
+        Action(
+            kind=ActionKind.MOVE,
+            target_id="e0001",
+            delta_x=delta_x,
+            delta_y=delta_y,
+        ),
+    )
+    moved = result.state.entity("e0001")
+    assert (moved.x, moved.y) == (object_x + delta_x, object_y + delta_y)
+    assert result.trace.blocked_by == ()
+
+
+@pytest.mark.parametrize(
+    ("object_x", "object_y", "delta_x", "delta_y"),
+    [
+        (100, 1099, 1100, 0),  # overlaps outer top extent by one microunit
+        (100, 201, 1100, 0),  # overlaps outer bottom extent by one microunit
+        (201, 100, 0, 1100),  # overlaps outer left extent by one microunit
+        (1099, 100, 0, 1100),  # overlaps outer right extent by one microunit
+    ],
+)
+def test_one_microunit_corner_overlap_remains_blocked(
+    object_x: int, object_y: int, delta_x: int, delta_y: int
+) -> None:
+    result = transition(
+        _finite_wall_state(object_x=object_x, object_y=object_y),
+        Action(
+            kind=ActionKind.MOVE,
+            target_id="e0001",
+            delta_x=delta_x,
+            delta_y=delta_y,
+        ),
+    )
+    unmoved = result.state.entity("e0001")
+    assert (unmoved.x, unmoved.y) == (object_x, object_y)
+    assert result.trace.blocked_by == ("b0001",)
+
+
 def test_swept_boundary_blocks_forward_and_reverse_outside_to_outside_tunnelling() -> None:
     forward = transition(
         _tunnelling_state(left_enabled=True, right_enabled=False),
@@ -257,6 +372,38 @@ def test_large_sweep_requires_an_opening_at_every_crossed_plane() -> None:
         Action(kind=ActionKind.MOVE, target_id="e0001", delta_x=1100),
     )
     assert whole_boundary_open.state.entity("e0001").x == 1200
+
+
+def test_distant_unrelated_container_does_not_block_an_aligned_open_sweep() -> None:
+    base = _tunnelling_state(left_enabled=True, right_enabled=True)
+    distant_container = Entity(
+        entity_id="e0003",
+        role=EntityRole.CONTAINER,
+        x=500,
+        y=2000,
+        width=400,
+        height=400,
+    )
+    state = WorldState.model_validate(
+        {
+            **base.model_dump(),
+            "entities": (*base.entities, distant_container),
+            "boundaries": (
+                *base.boundaries,
+                Boundary(
+                    boundary_id="b0002",
+                    container_id="e0003",
+                    thickness=20,
+                ),
+            ),
+        }
+    )
+    result = transition(
+        state,
+        Action(kind=ActionKind.MOVE, target_id="e0001", delta_x=1100),
+    )
+    assert result.state.entity("e0001").x == 1200
+    assert result.trace.blocked_by == ()
 
 
 def test_partial_boundary_start_is_fail_closed_without_a_fitting_opening() -> None:

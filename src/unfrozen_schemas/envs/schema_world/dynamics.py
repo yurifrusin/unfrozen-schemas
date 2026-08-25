@@ -126,20 +126,23 @@ def _interior(container: Entity, boundary: Boundary) -> tuple[int, int, int, int
 
 
 def _crossed_sides(
-    before: Entity, proposed: Entity, bounds: tuple[int, int, int, int]
+    before: Entity,
+    proposed: Entity,
+    container: Entity,
+    bounds: tuple[int, int, int, int],
 ) -> tuple[BoundarySide, ...]:
-    """Return every boundary plane intersected by the open swept rectangle extent."""
+    """Return every finite wall segment intersected by the open swept rectangle extent."""
 
     left, right, bottom, top = bounds
     sides: list[BoundarySide] = []
-    if before.x != proposed.x:
+    if before.x != proposed.x and _vertical_overlap(before, container) > 0:
         swept_left = min(before.x, proposed.x)
         swept_right = max(before.x + before.width, proposed.x + proposed.width)
         if swept_left < left < swept_right:
             sides.append(BoundarySide.LEFT)
         if swept_left < right < swept_right:
             sides.append(BoundarySide.RIGHT)
-    if before.y != proposed.y:
+    if before.y != proposed.y and _horizontal_overlap(before, container) > 0:
         swept_bottom = min(before.y, proposed.y)
         swept_top = max(before.y + before.height, proposed.y + proposed.height)
         if swept_bottom < bottom < swept_top:
@@ -165,7 +168,7 @@ def _movement_blockers(state: WorldState, before: Entity, proposed: Entity) -> t
             continue
         container = entities[boundary.container_id]
         bounds = _interior(container, boundary)
-        crossed = _crossed_sides(before, proposed, bounds)
+        crossed = _crossed_sides(before, proposed, container, bounds)
         if not crossed:
             continue
         boundary_openings = tuple(
