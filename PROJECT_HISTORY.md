@@ -37,6 +37,20 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - `PROJECT_HISTORY.md` and `RESEARCH_LOG.md` introduced.
 - Controlled document ingestion from the owner-workstation staging directory documented.
 
+## 2026-08-25
+
+### Milestone 0 canonical closeout
+
+- Owner approval identified pull request `#1` and exact head `b48ea734e41595ef1d071e52ee8a943c503ded44`.
+- Pull request `https://github.com/yurifrusin/unfrozen-schemas/pull/1` was revalidated as mergeable with its required `cpu` check passing and no unresolved review threads, then merged into `origin/main` at `98e4a932cff37351efcf6873702aeb5c904fe53e`.
+- Local `main` was fast-forwarded to that canonical implementation merge and verified clean and equal to `origin/main`.
+- Post-merge verification passed: locked dependency synchronisation, Ruff lint and formatting, strict mypy over 12 source files, all 31 pytest tests, and offline CPU smoke run `milestone-0-smoke-20260825T034715219278Z-1cccce044e`.
+- Revision 6 `CODEX_SPEC.md` remained unchanged at SHA-256 `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`.
+- Linked closeout pull request: `https://github.com/yurifrusin/unfrozen-schemas/pull/2`.
+- The immutable annotated tag is `milestone-0-complete`; its GitHub Release is `https://github.com/yurifrusin/unfrozen-schemas/releases/tag/milestone-0-complete`.
+- Repository and documentation licensing remain unresolved.
+- Advancement decision: Milestone 0 is complete only after the linked closeout record is merged and that tag and release are published from canonical `main`; Milestone 1 is then authorised but is not begun by this closeout.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>
