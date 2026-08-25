@@ -51,6 +51,49 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Repository and documentation licensing remain unresolved.
 - Advancement decision: Milestone 0 is complete only after the linked closeout record is merged and that tag and release are published from canonical `main`; Milestone 1 is then authorised but is not begun by this closeout.
 
+### Main protection and Milestone 1 branch start
+
+- Canonical branch point: `a1712c7d6229fd90c5619414fc13fa1a21a4cd22`, equal to local
+  `main`, `origin/main`, and the target of `milestone-0-complete` at task preflight.
+- Repository ruleset `21295385` was activated specifically for `refs/heads/main` after its initial
+  empty branch target was found ineffective.
+- Effective rules require pull requests, the strict/up-to-date `cpu` check from GitHub Actions app
+  ID `15368`, zero approving reviews, and resolved review conversations; they prohibit branch
+  deletion and non-fast-forward pushes.
+- CODEOWNERS review, signed commits, linear history, merge queue, and automatic merging are not
+  required. Repository administrators retain a bypass for exceptional recovery, not routine
+  milestone work.
+- Milestone 1 branch started as `codex/milestone-1-schemaworld-core` from the exact canonical branch
+  point above.
+- Status: Milestone 1 implementation is in progress and is not a completed, merged, tagged, or
+  released milestone.
+
+### Milestone 1 pre-release causal-contract correction
+
+- Continued on `codex/milestone-1-schemaworld-core` and pull request
+  `https://github.com/yurifrusin/unfrozen-schemas/pull/3` from pre-correction head
+  `34735ae73515cd6271d7b0c5e546b440bf82971d`.
+- Tightened the unreleased SchemaWorld Core contract for exact taut tether support, swept containment
+  crossings, canonical per-kind action parameters, complete pair identities, independent persisted
+  trajectory verification, state-graph references, explicit observation codes, and relation leakage.
+- The environment remains `schemaworld-core-v1` because no Milestone 1 compatibility promise or
+  scientific artifact has been released.
+- Status: correction work remains on the open implementation pull request and is not merged, tagged,
+  released, scientifically frozen, or a completed milestone.
+
+### Milestone 1 finite-wall containment correction
+
+- Continued on `codex/milestone-1-schemaworld-core` and pull request
+  `https://github.com/yurifrusin/unfrozen-schemas/pull/3` from pre-correction head
+  `4d2c14a8bd1b40eddf3319cbb357f872270618d3`.
+- Constrained swept containment checks to finite rectangular wall extents: a movement-axis plane is
+  relevant only when the object's fixed orthogonal interval positively overlaps the container's
+  outer orthogonal interval; exact tangency remains non-colliding.
+- The tracked template states and actions remain unchanged, and all five pinned pair, opaque-codec,
+  and raw-render regression identities remain unchanged.
+- Status: the correction remains on the open implementation pull request and is not merged, tagged,
+  released, scientifically frozen, or a completed milestone.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

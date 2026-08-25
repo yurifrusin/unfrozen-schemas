@@ -64,6 +64,35 @@ Milestone 0 established the governed software, provenance, resource-accounting, 
 
 The specification and scientific design were not changed during closeout. Milestone 1 becomes authorised only after the reviewed closeout record is merged and the immutable `milestone-0-complete` tag and GitHub Release are published from canonical `main`; no Milestone 1 implementation is part of this event.
 
+## 2026-08-25 — Causal validity requires path and constraint semantics
+
+Pre-release review of SchemaWorld Core exposed two apparatus-level ambiguities. Treating every tether
+shorter than a maximum range as tension allowed slack links to support objects, and checking only
+containment membership at movement endpoints allowed large actions to tunnel through a closed
+container.
+
+Milestone 1 therefore adopts an exact taut inextensible-link contract for active load-bearing
+tethers and exact swept boundary-plane checks for axis-aligned containment movement. Slack-to-taut
+motion is deliberately absent from the minimal core, so slack active load-bearing states are invalid.
+Every closed plane crossed by a swept body requires its own correctly aligned aperture. These are
+corrections to the deterministic causal apparatus, not new hypotheses, benchmark choices, treatment
+conditions, or scientific findings. They preserve condition comparability by making the intended
+causal distinction explicit before release.
+
+## 2026-08-25 — Containment walls are finite geometric segments
+
+Final pre-release review found that movement-axis plane crossing alone implicitly extended each
+container wall infinitely along its orthogonal axis. That artifact could make a distant container
+block motion occurring entirely above, below, left, or right of it.
+
+SchemaWorld Core now treats a wall crossing as the conjunction of two exact integer conditions: the
+swept movement interval intersects the relevant inset wall plane, and the moving body's fixed
+orthogonal interval positively overlaps the container's finite outer orthogonal interval. Zero-width
+tangential contact is non-colliding, while a one-microunit overlap remains collision-relevant and
+must satisfy the existing aperture contract. This narrows the implementation to the intended finite
+rectangular apparatus without changing templates, actions, experimental conditions, or pinned
+scientific identities.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>

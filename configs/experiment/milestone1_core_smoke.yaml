@@ -1,0 +1,39 @@
+schema_version: "1"
+run:
+  name: milestone-1-core-smoke
+  output_root: runs
+  device: cpu
+  offline: true
+  requires_secret: false
+  engineering_only: true
+environment:
+  environment_version: schemaworld-core-v1
+  coordinate_unit: microunit
+  coordinate_min: 0
+  coordinate_max: 10000
+  fixed_point_scale: 1
+  gravity_per_step: -100
+  max_steps: 4
+  transition_stage_order:
+    - action_application
+    - contact_resolution
+    - support_evaluation
+    - gravity
+    - collision_resolution
+    - delayed_events
+    - relation_derivation
+generator:
+  algorithm: splitmix64
+  version: "1"
+  seeds: [101, 202]
+  noise_seed_offset: 100000
+template_families:
+  - containment_gate_v1
+  - support_platform_v1
+  - support_tension_v1
+codec:
+  version: opaque-byte-v1
+renderer:
+  version: schemaworld-raster-v1
+  width: 128
+  height: 128

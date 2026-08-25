@@ -50,3 +50,15 @@ jobs:
           HF_HUB_OFFLINE: "1"
           TRANSFORMERS_OFFLINE: "1"
         run: uv run --frozen unfrozen smoke
+
+      - name: SchemaWorld Core generation and replay smoke
+        env:
+          CUDA_VISIBLE_DEVICES: ""
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+        run: |
+          uv run --frozen unfrozen generate-core --config configs/experiment/milestone1_core_smoke.yaml
+          manifest="$(find runs -mindepth 2 -maxdepth 2 -name core_manifest.json)"
+          test -n "$manifest"
+          uv run --frozen unfrozen validate-core --manifest "$manifest"
+          uv run --frozen unfrozen replay-core --manifest "$manifest"
