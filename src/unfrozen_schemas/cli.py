@@ -31,6 +31,7 @@ from unfrozen_schemas.evaluation.benchmark_models import (
     BenchmarkPurpose,
 )
 from unfrozen_schemas.evaluation.benchmark_persistence import (
+    resolve_candidate_version_path,
     resolve_version_path,
     validate_benchmark_version,
 )
@@ -56,13 +57,50 @@ DEFAULT_CORE_CONFIG = Path("configs/experiment/milestone1_core_smoke.yaml")
 def _resolve_benchmark_manifest(version: str) -> Path:
     repository = find_repository_root(Path.cwd())
     safe_version = validate_benchmark_version(version)
-    private = resolve_version_path(repository, "private", safe_version) / "candidate_manifest.json"
-    frozen = resolve_version_path(repository, "frozen", safe_version) / "frozen_manifest.json"
-    if frozen.is_file():
-        return frozen
-    if private.is_file():
-        return private
-    raise ValueError(f"Version {version!r} has no private or frozen manifest")
+    candidates = (
+        resolve_version_path(repository, "private", safe_version) / "candidate_manifest.json",
+        resolve_version_path(repository, "selection", safe_version) / "candidate_manifest.json",
+        resolve_version_path(repository, "frozen", safe_version) / "frozen_manifest.json",
+    )
+    private, _selection, frozen = candidates
+    existing = tuple(path for path in candidates if path.is_file())
+    if len(existing) == 1:
+        return existing[0]
+    if set(existing) == {private, frozen}:
+        private_payload = json.loads(private.read_text(encoding="utf-8"))
+        frozen_payload = json.loads(frozen.read_text(encoding="utf-8"))
+        compatible = (
+            private_payload.get("benchmark_version") == safe_version
+            and frozen_payload.get("benchmark_version") == safe_version
+            and private_payload.get("purpose") == frozen_payload.get("purpose")
+            and private_payload.get("purpose") in {"outcome", "retention"}
+            and private_payload.get("candidate_bundle_root_sha256")
+            == frozen_payload.get("candidate_bundle_root_sha256")
+        )
+        if compatible:
+            return frozen
+    if existing:
+        raise ValueError(
+            f"Benchmark version {version!r} is ambiguous across canonical lifecycle roots"
+        )
+    raise ValueError(f"Version {version!r} has no canonical candidate or frozen manifest")
+
+
+def _resolve_candidate_manifest(version: str) -> Path:
+    repository = find_repository_root(Path.cwd())
+    safe_version = validate_benchmark_version(version)
+    candidates = (
+        resolve_version_path(repository, "private", safe_version) / "candidate_manifest.json",
+        resolve_version_path(repository, "selection", safe_version) / "candidate_manifest.json",
+    )
+    existing = tuple(path for path in candidates if path.is_file())
+    if len(existing) > 1:
+        raise ValueError(
+            f"Benchmark version {version!r} is ambiguous across canonical candidate roots"
+        )
+    if existing:
+        return existing[0]
+    raise ValueError(f"Version {version!r} has no canonical PRIVATE candidate manifest")
 
 
 def _report_configuration_error(exc: Exception) -> None:
@@ -343,10 +381,6 @@ def build_benchmark_command(
             help="Directory containing the one supported source_manifest.json + items.jsonl form.",
         ),
     ],
-    output: Annotated[
-        Path,
-        typer.Option("--output", file_okay=False, help="New PRIVATE candidate destination."),
-    ],
     version: Annotated[
         str, typer.Option("--version", help="Immutable benchmark version identity.")
     ],
@@ -354,6 +388,14 @@ def build_benchmark_command(
         BenchmarkPurpose,
         typer.Option("--purpose", case_sensitive=False, help="Quarantined benchmark purpose."),
     ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            file_okay=False,
+            help="Exact canonical destination; required only for engineering fixtures.",
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Validate and derive logical identities without writes."),
@@ -363,12 +405,20 @@ def build_benchmark_command(
 
     try:
         safe_version = validate_benchmark_version(version)
+        repository = find_repository_root(Path.cwd())
+        if output is None:
+            if purpose is BenchmarkPurpose.ENGINEERING:
+                raise ValueError("Engineering benchmark builds require an explicit --output")
+            destination = resolve_candidate_version_path(repository, safe_version, purpose)
+        else:
+            destination = output
         result = build_benchmark(
             source_directory=source,
-            output_directory=output,
+            output_directory=destination,
             version=safe_version,
             purpose=purpose,
             dry_run=dry_run,
+            repository_root=repository,
         )
     except BenchmarkOperationError as exc:
         typer.echo(f"Benchmark build failed: {exc}", err=True)
@@ -396,7 +446,10 @@ def validate_benchmark_command(
     ] = None,
     version: Annotated[
         str | None,
-        typer.Option("--version", help="Resolve under benchmarks/private or benchmarks/frozen."),
+        typer.Option(
+            "--version",
+            help="Resolve unambiguously under private, selection, or frozen canonical roots.",
+        ),
     ] = None,
     against_manifest: Annotated[
         list[Path] | None,
@@ -510,8 +563,7 @@ def freeze_benchmark_command(
         selected = (
             candidate_manifest
             if candidate_manifest is not None
-            else resolve_version_path(repository, "private", str(safe_version))
-            / "candidate_manifest.json"
+            else _resolve_candidate_manifest(str(safe_version))
         )
         if not selected.is_file():
             raise ValueError(f"Candidate manifest does not exist: {selected}")

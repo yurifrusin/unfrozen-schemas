@@ -165,6 +165,23 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Status: correction remains part of the open M2.1 implementation PR. No merge, tag, release,
   production benchmark content, M2.2 work, model access, or GPU work has occurred.
 
+### Milestone 2 M2.1 canonical-storage correction
+
+- Continued on `codex/milestone-2-m2-1-benchmark-lifecycle` and pull request
+  `https://github.com/yurifrusin/unfrozen-schemas/pull/5` from pre-correction head
+  `23ce324f6fa8865d3d5acbcbb9deae270f4e7209`.
+- Bound outcome/retention candidates to `benchmarks/private/<version>`, selection candidates to
+  `benchmarks/selection/<version>`, and otherwise authorised non-engineering frozen versions to
+  `benchmarks/frozen/<version>`; copied or arbitrary scientific locations now fail validation,
+  approval use, and freeze.
+- Added selection-root version lookup with incompatible-root ambiguity refusal, refused every
+  selection-purpose freeze throughout M2.1, and made PRIVATE post-publication read-back failure
+  quarantine or remove the candidate while preserving the original exception.
+- Paths remain outside logical identities, and all engineering-fixture regression identities remain
+  unchanged.
+- Status: correction remains part of the open M2.1 implementation PR. No merge, tag, release,
+  production benchmark content, M2.2 work, model access, or GPU work has occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

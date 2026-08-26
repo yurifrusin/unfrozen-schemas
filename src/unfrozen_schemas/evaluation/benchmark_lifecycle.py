@@ -45,6 +45,8 @@ from unfrozen_schemas.evaluation.benchmark_models import (
 from unfrozen_schemas.evaluation.benchmark_persistence import (
     make_artifact_records,
     read_canonical_model,
+    resolve_candidate_version_path,
+    resolve_frozen_version_path,
     write_canonical_json,
     write_canonical_jsonl,
 )
@@ -55,6 +57,8 @@ from unfrozen_schemas.evaluation.benchmark_validation import (
     FROZEN_BUDGET_PATHS,
     FROZEN_MANIFEST_FILENAME,
     VALIDATION_CHECKS,
+    _load_candidate_payload,
+    _load_frozen_payload,
     coverage_summary,
     create_quarantine_scope,
     ensure_lifecycle_transition,
@@ -300,7 +304,17 @@ def build_benchmark(
     item_count = 0
     input_hashes: dict[str, str] = {}
     quarantine_scope: QuarantineScope | None = None
+    published_quarantine: Path | None = None
+    publication_cleanup_error: str | None = None
+    published = False
     try:
+        if purpose is not BenchmarkPurpose.ENGINEERING:
+            expected_output = resolve_candidate_version_path(repository, version, purpose)
+            if output != expected_output:
+                raise ValueError(
+                    "Non-engineering build destination must be the exact canonical "
+                    f"purpose-specific directory: {expected_output}"
+                )
         if output.exists():
             raise FileExistsError(f"PRIVATE candidate destination already exists: {output}")
         _, snapshot = load_source_directory(
@@ -457,10 +471,17 @@ def build_benchmark(
         )
         manifest_path = staging / CANDIDATE_MANIFEST_FILENAME
         write_canonical_json(manifest_path, candidate)
-        validate_benchmark_manifest(manifest_path, repository_root=repository)
+        _load_candidate_payload(
+            manifest_path,
+            repository_root=repository,
+            revalidate_quarantine=False,
+            enforce_storage_location=False,
+        )
         os.replace(staging, output)
+        published = True
+        _after_candidate_publication(output)
         published_manifest = output / CANDIDATE_MANIFEST_FILENAME
-        validate_benchmark_manifest(published_manifest, repository_root=repository)
+        _read_back_published_candidate(published_manifest, repository)
         return BenchmarkOperationResult(
             operation_id=operation_id,
             dry_run=False,
@@ -473,9 +494,19 @@ def build_benchmark(
         )
     except Exception as exc:
         peak = _peak_and_restore(tracing_started_here, tracing_was_active)
+        original_reason = f"{type(exc).__name__}: {exc}"
+        if published and output.exists():
+            try:
+                published_quarantine = _quarantine_failed_publication(
+                    output,
+                    operation_id,
+                    invalid_kind="private",
+                )
+            except Exception as cleanup_exc:
+                publication_cleanup_error = f"{type(cleanup_exc).__name__}: {cleanup_exc}"
         with suppress(Exception):
             _safe_remove_staging(staging, output.parent)
-        reason = f"{type(exc).__name__}: {exc}"
+        reason = original_reason
         failure_path = None
         if not dry_run:
             failure_path = _failure_record(
@@ -500,6 +531,12 @@ def build_benchmark(
                     else None
                 ),
             )
+        if published_quarantine is not None:
+            reason += f"; invalid publication quarantined at {published_quarantine.name}"
+        elif published and not output.exists():
+            reason += "; invalid publication removed after quarantine move failure"
+        if publication_cleanup_error is not None:
+            reason += f"; secondary publication cleanup failure: {publication_cleanup_error}"
         raise BenchmarkOperationError(reason, failure_record_path=failure_path) from exc
 
 
@@ -563,6 +600,14 @@ def create_engineering_freeze_approval(
     return restored
 
 
+def _after_candidate_publication(_output: Path) -> None:
+    """Injection seam for the first instruction after PRIVATE publication."""
+
+
+def _read_back_published_candidate(manifest_path: Path, repository_root: Path) -> None:
+    validate_benchmark_manifest(manifest_path, repository_root=repository_root)
+
+
 def _after_frozen_publication(_output: Path) -> None:
     """Injection seam for the first instruction after atomic publication."""
 
@@ -577,12 +622,17 @@ def _make_tree_writable(root: Path) -> None:
             path.chmod(path.stat().st_mode | stat.S_IWUSR)
 
 
-def _quarantine_failed_publication(output: Path, operation_id: str) -> Path | None:
-    """Move a published failure to an invalid name, deleting only as a last resort."""
+def _quarantine_failed_publication(
+    output: Path,
+    operation_id: str,
+    *,
+    invalid_kind: Literal["private", "frozen"],
+) -> Path | None:
+    """Move a published failure to a type-specific invalid name or remove it."""
 
     if not output.exists():
         return None
-    quarantine = output.parent / f".{output.name}.invalid-frozen-{operation_id}"
+    quarantine = output.parent / f".{output.name}.invalid-{invalid_kind}-{operation_id}"
     if quarantine.exists():
         raise RuntimeError(f"Invalid-publication quarantine already exists: {quarantine}")
     try:
@@ -599,7 +649,7 @@ def _quarantine_failed_publication(output: Path, operation_id: str) -> Path | No
                 return None
             except Exception as remove_exc:
                 raise RuntimeError(
-                    "Unable to quarantine or remove failed FROZEN publication; "
+                    f"Unable to quarantine or remove failed {invalid_kind.upper()} publication; "
                     f"replace={replace_exc}; move={move_exc}; remove={remove_exc}"
                 ) from remove_exc
 
@@ -660,8 +710,14 @@ def freeze_benchmark(
         purpose = candidate.purpose
         item_count = candidate.item_count
         quarantine_scope_sha256 = candidate.quarantine_scope_sha256
+        if not candidate.engineering_only:
+            expected_output = resolve_frozen_version_path(repository, version, purpose)
+            if output != expected_output:
+                raise ValueError(
+                    "Non-engineering frozen destination must be the exact canonical directory: "
+                    f"{expected_output}"
+                )
         approval = read_canonical_model(approval_path, FreezeApproval)
-        from unfrozen_schemas.evaluation.benchmark_validation import _load_candidate_payload
 
         _, items, _ = _load_candidate_payload(candidate_manifest_path, repository_root=repository)
         verify_freeze_approval(candidate_manifest_path, candidate, items, approval)
@@ -786,16 +842,20 @@ def freeze_benchmark(
         )
         staging_manifest = staging / FROZEN_MANIFEST_FILENAME
         write_canonical_json(staging_manifest, frozen)
-        final_candidate = validate_benchmark_manifest(
-            candidate_manifest_path, repository_root=repository
+        final_candidate, final_items, _ = _load_candidate_payload(
+            candidate_manifest_path,
+            repository_root=repository,
+            transient_staging_roots=(staging,),
         )
         if final_candidate != candidate:
             raise ValueError("PRIVATE candidate changed during freeze construction")
-        _, final_items, _ = _load_candidate_payload(
-            candidate_manifest_path, repository_root=repository
-        )
         verify_freeze_approval(candidate_manifest_path, candidate, final_items, approval)
-        validate_benchmark_manifest(staging_manifest, repository_root=repository)
+        _load_frozen_payload(
+            staging_manifest,
+            repository_root=repository,
+            revalidate_quarantine=False,
+            enforce_storage_location=False,
+        )
         os.replace(staging, output)
         published = True
         _after_frozen_publication(output)
@@ -817,7 +877,11 @@ def freeze_benchmark(
         original_reason = f"{type(exc).__name__}: {exc}"
         if published and output.exists():
             try:
-                published_quarantine = _quarantine_failed_publication(output, operation_id)
+                published_quarantine = _quarantine_failed_publication(
+                    output,
+                    operation_id,
+                    invalid_kind="frozen",
+                )
             except Exception as cleanup_exc:
                 publication_cleanup_error = f"{type(cleanup_exc).__name__}: {cleanup_exc}"
         with suppress(Exception):

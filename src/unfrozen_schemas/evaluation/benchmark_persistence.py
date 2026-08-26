@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from unfrozen_schemas.config import sha256_file
 from unfrozen_schemas.evaluation.benchmark_hashing import canonical_logical_bytes
-from unfrozen_schemas.evaluation.benchmark_models import SLUG_PATTERN
+from unfrozen_schemas.evaluation.benchmark_models import SLUG_PATTERN, BenchmarkPurpose
 from unfrozen_schemas.provenance import ArtifactRecord
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -42,9 +42,9 @@ def validate_benchmark_version(version: str) -> str:
 
 
 def resolve_version_path(repository_root: Path, area: str, version: str) -> Path:
-    """Resolve a version directory below the only two lifecycle storage areas."""
+    """Resolve a version directory below one canonical lifecycle storage area."""
 
-    if area not in {"private", "frozen"}:
+    if area not in {"private", "selection", "frozen"}:
         raise ValueError(f"Unsupported benchmark version area: {area}")
     safe_version = validate_benchmark_version(version)
     base = (repository_root.resolve() / "benchmarks" / area).resolve()
@@ -52,6 +52,36 @@ def resolve_version_path(repository_root: Path, area: str, version: str) -> Path
     if resolved.parent != base:
         raise ValueError(f"Benchmark version path escapes benchmarks/{area}: {version}")
     return resolved
+
+
+def resolve_candidate_version_path(
+    repository_root: Path,
+    version: str,
+    purpose: BenchmarkPurpose,
+) -> Path:
+    """Resolve the one canonical PRIVATE candidate directory for a scientific purpose."""
+
+    if purpose is BenchmarkPurpose.SELECTION:
+        area = "selection"
+    elif purpose in {BenchmarkPurpose.OUTCOME, BenchmarkPurpose.RETENTION}:
+        area = "private"
+    else:
+        raise ValueError("Engineering candidates do not have a canonical repository destination")
+    return resolve_version_path(repository_root, area, version)
+
+
+def resolve_frozen_version_path(
+    repository_root: Path,
+    version: str,
+    purpose: BenchmarkPurpose,
+) -> Path:
+    """Resolve the canonical frozen directory for an otherwise authorised purpose."""
+
+    if purpose is BenchmarkPurpose.SELECTION:
+        raise ValueError("SELECTION-purpose freezing is refused throughout M2.1")
+    if purpose is BenchmarkPurpose.ENGINEERING:
+        raise ValueError("Engineering fixtures do not have a canonical repository destination")
+    return resolve_version_path(repository_root, "frozen", version)
 
 
 def write_canonical_json(path: Path, value: BaseModel | dict[str, Any]) -> None:

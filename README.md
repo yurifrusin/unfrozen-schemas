@@ -85,6 +85,15 @@ Validation also enforces purpose-neutral exact-display and order-neutral content
 strict reverse-pair equivalence contract, recursive public-data isolation, exact cross-record
 provenance, repository-root version resolution, and the M2.1 tracked-README allowlist.
 
+Non-engineering candidate storage is exact: outcome and retention use
+`benchmarks/private/<version>`, while selection uses `benchmarks/selection/<version>`. Approved
+outcome/retention frozen versions, where otherwise authorised, use `benchmarks/frozen/<version>`.
+Omitted build output is derived from purpose/version; a supplied output and every directly validated
+manifest must match the canonical path exactly. Version lookup includes the selection root and fails
+on incompatible ambiguity. M2.1 refuses every selection-purpose freeze and continues to refuse
+production `v1_core`. A fatal error after PRIVATE publication quarantines the candidate under an
+unmistakably invalid `invalid-private` sibling or removes it, preserving the original failure.
+
 The unreleased `schemaworld-core-v1` contract fails closed on slack or overlength active
 load-bearing tethers, diagonal movement, swept closed-boundary tunnelling, non-canonical action
 parameters, incomplete pair identities, invalid state-graph references, relation-vocabulary leakage,

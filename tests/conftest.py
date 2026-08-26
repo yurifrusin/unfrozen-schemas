@@ -29,6 +29,7 @@ def clean_benchmark_repository(tmp_path: Path) -> Path:
     ):
         repository.joinpath(relative).mkdir(parents=True)
     shutil.copyfile(Path("CODEX_SPEC.md"), repository / "CODEX_SPEC.md")
+    shutil.copyfile(Path(".gitignore"), repository / ".gitignore")
     subprocess.run(["git", "init"], cwd=repository, check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.email", "benchmark-tests@example.invalid"],
@@ -36,7 +37,7 @@ def clean_benchmark_repository(tmp_path: Path) -> Path:
         check=True,
     )
     subprocess.run(["git", "config", "user.name", "Benchmark Tests"], cwd=repository, check=True)
-    subprocess.run(["git", "add", "CODEX_SPEC.md"], cwd=repository, check=True)
+    subprocess.run(["git", "add", "CODEX_SPEC.md", ".gitignore"], cwd=repository, check=True)
     subprocess.run(
         ["git", "commit", "-m", "test provenance"],
         cwd=repository,

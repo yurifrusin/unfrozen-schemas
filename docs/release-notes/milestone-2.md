@@ -23,7 +23,10 @@
   scan; adds purpose-neutral exact-display and order-neutral fingerprints; freezes the reverse-pair
   equivalence contract; completes recursive public isolation and cross-record consistency; makes
   post-publication failure atomic; and replaces version-path and tracked-file heuristics with
-  fail-closed validation. It contains no real benchmark item.
+  fail-closed validation. The final storage correction binds every non-engineering candidate and
+  frozen manifest to its exact purpose-specific repository location, resolves selection versions
+  from their own root, refuses every M2.1 selection freeze, and gives PRIVATE publication the same
+  fail-closed post-rename handling as FROZEN publication. It contains no real benchmark item.
 - **M2.2 — literal/counterfactual families:** pending.
 - **M2.3 — abstract/metaphorical families:** pending.
 - **M2.4 — scoring, option order, leakage, retention:** pending.
@@ -58,6 +61,10 @@
 - Final CI, tag, release date, release URL, and advancement decision: `<pending>`
 
 ## M2.1 engineering-fixture regression identities
+
+The canonical-storage correction changes only operational path validation. Paths remain excluded
+from logical records and hashes, so all corrected engineering-fixture identities below remain
+unchanged by this pass.
 
 | Identity | Previous | Corrected | Reason |
 |---|---|---|---|

@@ -25,11 +25,14 @@ candidate manifest, operation records, freeze approval, receipt, and frozen mani
 Candidate validation re-scans every declared root. Missing/unreadable roots, malformed manifests,
 added or removed external manifests, file changes, changed identities, or scope-hash mismatch fail
 closed. Freeze performs the scan both before using the approval and immediately before publication.
-The exact current candidate lineage is excluded from its own scan so publishing or copying that
-same candidate into its FROZEN directory is not self-referential; every other manifest remains in
-scope. Any external manifest added after construction makes the candidate stale and requires a new
-candidate build identity. Engineering fixtures alone use an explicit `engineering_empty` scope.
-`--against-manifest` remains a supplemental diagnostic and is never the mandatory quarantine.
+Only the exact canonical candidate and its exact canonical FROZEN copy may be excluded as the
+current lineage, so the lifecycle does not become self-referential. An arbitrary duplicate elsewhere
+in a canonical root is never excluded, even if its IDs and candidate root match or its directory is
+named like staging. During one atomic operation, validation may separately omit only the exact
+unpublished sibling staging directory created by that operation; direct validation cannot request
+that exception. Any other manifest added after construction makes the candidate stale and requires
+a new candidate build identity. Engineering fixtures alone use an explicit `engineering_empty`
+scope. `--against-manifest` remains a supplemental diagnostic and is never the mandatory quarantine.
 
 Two separately domain-framed, purpose-neutral fingerprints prevent identity laundering:
 
@@ -41,7 +44,8 @@ Two separately domain-framed, purpose-neutral fingerprints prevent identity laun
 
 Equivalence normalises line endings, Unicode to NFC, whitespace, and case. Cross-purpose reuse is
 therefore rejected after renamed IDs, changed pair metadata, reversed options, case-only changes, or
-Unicode/whitespace presentation changes. Directory placement alone is not quarantine.
+Unicode/whitespace presentation changes. Canonical placement is a necessary boundary for every
+non-engineering artifact, while the hash-bound content scan remains the quarantine mechanism.
 
 `selection_probe_v1` is reserved for M2.5 selection use. `v1_core` is reserved for the M2.6 outcome
 freeze. Neither name may identify an engineering fixture.
@@ -64,12 +68,28 @@ SOURCE → PRIVATE → FROZEN
   affirmative approval, immutable receipt, and new operation record. Corrections require a new
   benchmark version.
 
+Non-engineering storage is exact and repository-relative:
+
+| Purpose | PRIVATE candidate | FROZEN version in M2.1 |
+|---|---|---|
+| `outcome` | `benchmarks/private/<version>/candidate_manifest.json` | `benchmarks/frozen/<version>/frozen_manifest.json`, where otherwise authorised |
+| `retention` | `benchmarks/private/<version>/candidate_manifest.json` | `benchmarks/frozen/<version>/frozen_manifest.json`, where otherwise authorised |
+| `selection` | `benchmarks/selection/<version>/candidate_manifest.json` | refused for every selection version throughout M2.1 |
+| `engineering` | isolated temporary directory permitted | isolated temporary directory permitted |
+
+A non-engineering build with no `--output` derives this path from purpose and version. A supplied
+output must resolve exactly to it. Direct validation, approval use, and freeze reject a candidate
+copied or moved elsewhere; frozen validation likewise requires the exact canonical frozen path.
+Paths are operational checks only and never enter manifests or logical hashes.
+
 Direct `SOURCE → FROZEN`, every downgrade, candidate overwrite, frozen overwrite, destination
 collision, reused frozen version, stale approval, and hash mismatch fail. The writer stages beside
-the final destination and atomically renames where supported. Staging failures are removed; a failed
-post-publication validation is moved to a clearly invalid quarantine name. Filesystem read-only
-flags are applied after successful publication as a convenience only. Application refusal,
-manifests, logical hashes, and version identities provide the scientific guarantee.
+the final destination and atomically renames where supported. Staging failures are removed. A failed
+PRIVATE post-publication read-back is moved to a candidate-specific `invalid-private` sibling, while
+a failed FROZEN read-back uses `invalid-frozen`; if movement fails, removal is the fail-closed
+fallback. Filesystem read-only flags are applied after successful FROZEN publication as a
+convenience only. Application refusal, manifests, logical hashes, and version identities provide the
+scientific guarantee.
 
 ## Source format, stable IDs, and revisions
 
@@ -115,6 +135,11 @@ Answer-bearing and mutable. `benchmarks/source/*` is ignored except its README.
 
 ### PRIVATE candidate
 
+Outcome and retention candidates exist only under `benchmarks/private/<version>`. Selection
+candidates exist only under `benchmarks/selection/<version>`. Arbitrary non-engineering manifests
+are rejected because they are outside the complete repository quarantine universe scanned by every
+candidate capable of approval or freeze. Engineering fixtures remain temporary-path capable.
+
 The mandatory files are:
 
 ```text
@@ -152,6 +177,10 @@ A single private-answer bundle root may bind the complete private partition; per
 are never public because small answer spaces permit brute-force recovery.
 
 ### FROZEN private version
+
+Every non-engineering frozen version must be exactly
+`benchmarks/frozen/<version>/frozen_manifest.json`. M2.1 refuses every `selection`-purpose freeze,
+not only `selection_probe_v1`, and continues to refuse production `v1_core`.
 
 A frozen directory contains exact candidate artifacts plus:
 
@@ -217,7 +246,8 @@ Engineering approval is possible only for `engineering-benchmark-lifecycle-v1`, 
 or model-selection fields. Production freezing requires every item to have resolved rights,
 licence, human-validation, adjudication, and ethics references. `v1_core` remains additionally
 disabled in M2.1 until the separately implemented and reviewed M2.2–M2.5 evidence exists; M2.1 does
-not create a production approval.
+not create a production approval. Every selection-purpose freeze is independently disabled across
+M2.1; M2.5 must define and review its eventual selection-freeze procedure.
 
 ## Independent validation
 
@@ -269,15 +299,22 @@ uv run unfrozen validate-benchmark --manifest <frozen_manifest.json>
 uv run unfrozen audit-benchmark-git
 ```
 
+For prospective non-engineering sources, omit `--output` to derive the canonical destination or
+supply only that exact destination. Outcome/retention resolve below `benchmarks/private`; selection
+resolves below `benchmarks/selection`. Engineering commands continue to require explicit isolated
+outputs.
+
 Build and freeze support `--dry-run`; dry-run writes nothing. Existing destinations, invalid source,
 duplicates, leakage, corruption, unsafe paths, illegal transitions, missing/mismatched approvals,
 and production-readiness failure return non-zero. Non-dry-run failures attempt to preserve a strict
 sibling `BenchmarkOperationRecord` containing the original failure reason.
 
 All CLI `--version` values are validated as one lowercase slug before path construction. Version
-resolution starts at the repository root and can resolve only below `benchmarks/private/<version>`
-or `benchmarks/frozen/<version>`; traversal, slash/backslash, absolute, drive-qualified, empty, and
-dot forms fail before filesystem access. `audit-benchmark-git` uses an exact allowlist: the five
+resolution starts at the repository root and considers the private, selection, and frozen canonical
+locations. A selection candidate resolves below `benchmarks/selection`; a compatible private/frozen
+pair resolves to its FROZEN manifest. Incompatible duplicates across roots or purposes fail as
+ambiguous rather than being guessed. Traversal, slash/backslash, absolute, drive-qualified, empty,
+and dot forms fail before filesystem access. `audit-benchmark-git` uses an exact allowlist: the five
 reviewed benchmark README files are the only tracked `benchmarks/` paths in M2.1. Every other tracked
 file fails regardless of name, extension, or forced-add status.
 
@@ -291,12 +328,12 @@ Elapsed time uses `time.perf_counter`; peak memory means peak traced Python allo
 hash-stable files. External language, self-generated language, sensor observations/bytes,
 environment steps, forward/backward passes, and optimisation steps are truthfully observed zero.
 
-Freeze tracks atomic publication explicitly. Any non-advisory exception after the staging directory
-is moved to the requested destination moves that directory to a sibling `invalid-frozen` name; if
-the move itself fails, generated output is removed as the final fail-closed fallback. The original
-exception remains the primary failure. Final read-back occurs after publication. Filesystem
-read-only application is advisory and its failure cannot turn an otherwise valid FROZEN publication
-into a reported failed operation.
+Build and freeze both track atomic publication explicitly. Any non-advisory exception after staging
+is moved to the requested destination moves it to a type-correct `invalid-private` or
+`invalid-frozen` sibling; if the move itself fails, generated output is removed as the final
+fail-closed fallback. The original exception remains the primary failure and cleanup diagnostics are
+secondary. Final read-back occurs after publication. Filesystem read-only application is advisory
+and its failure cannot turn an otherwise valid FROZEN publication into a reported failed operation.
 
 ## Engineering-fixture boundary and M2.6 prerequisites
 

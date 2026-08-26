@@ -35,6 +35,8 @@ from unfrozen_schemas.evaluation.benchmark_models import (
 )
 from unfrozen_schemas.evaluation.benchmark_persistence import (
     read_canonical_model,
+    resolve_candidate_version_path,
+    resolve_frozen_version_path,
     write_canonical_json,
 )
 from unfrozen_schemas.evaluation.benchmark_validation import validate_benchmark_manifest
@@ -135,6 +137,95 @@ def _refresh_frozen_artifact(frozen_manifest_path: Path, relative: str) -> None:
         update={"frozen_manifest_sha256": frozen_manifest_hash(provisional)}
     )
     write_canonical_json(frozen_manifest_path, changed)
+
+
+@pytest.mark.parametrize(
+    "injection_point",
+    ("immediately_after_replace", "final_readback"),
+)
+def test_candidate_post_publication_failure_moves_output_to_private_quarantine(
+    tmp_path: Path,
+    engineering_source: Path,
+    clean_benchmark_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    injection_point: str,
+) -> None:
+    if injection_point == "immediately_after_replace":
+        monkeypatch.setattr(
+            benchmark_lifecycle_module,
+            "_after_candidate_publication",
+            lambda _output: (_ for _ in ()).throw(RuntimeError("injected candidate replace")),
+        )
+    else:
+        monkeypatch.setattr(
+            benchmark_lifecycle_module,
+            "_read_back_published_candidate",
+            lambda _manifest, _repository: (_ for _ in ()).throw(
+                RuntimeError("injected candidate readback")
+            ),
+        )
+    output = tmp_path / f"failed-candidate-{injection_point}"
+    with pytest.raises(BenchmarkOperationError, match="injected candidate") as raised:
+        build_benchmark(
+            source_directory=engineering_source,
+            output_directory=output,
+            version="engineering-benchmark-lifecycle-v1",
+            purpose=BenchmarkPurpose.ENGINEERING,
+            repository_root=clean_benchmark_repository,
+        )
+    assert str(raised.value).startswith("RuntimeError: injected candidate")
+    assert not output.exists()
+    retained = list(tmp_path.glob(f".{output.name}.invalid-private-*"))
+    assert len(retained) == 1
+    assert (retained[0] / "candidate_manifest.json").is_file()
+    assert not list(tmp_path.glob(f".{output.name}.invalid-frozen-*"))
+
+
+def test_candidate_quarantine_move_failure_removes_output_and_preserves_original_failure(
+    tmp_path: Path,
+    engineering_source: Path,
+    clean_benchmark_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "candidate-quarantine-move-failure"
+    real_replace = os.replace
+
+    def selective_replace(source: str | Path, destination: str | Path) -> None:
+        if Path(source) == output:
+            raise OSError("injected candidate quarantine replace failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", selective_replace)
+    monkeypatch.setattr(
+        shutil,
+        "move",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("injected candidate quarantine move failure")
+        ),
+    )
+    monkeypatch.setattr(
+        benchmark_lifecycle_module,
+        "_after_candidate_publication",
+        lambda _output: (_ for _ in ()).throw(RuntimeError("primary candidate failure")),
+    )
+    with pytest.raises(BenchmarkOperationError) as raised:
+        build_benchmark(
+            source_directory=engineering_source,
+            output_directory=output,
+            version="engineering-benchmark-lifecycle-v1",
+            purpose=BenchmarkPurpose.ENGINEERING,
+            repository_root=clean_benchmark_repository,
+        )
+    assert str(raised.value).startswith("RuntimeError: primary candidate failure")
+    assert "invalid publication removed" in str(raised.value)
+    assert not output.exists()
+    assert not list(tmp_path.glob(f".{output.name}.invalid-private-*"))
+    assert raised.value.failure_record_path is not None
+    record = read_canonical_model(
+        Path(raised.value.failure_record_path),
+        BenchmarkOperationRecord,
+    )
+    assert record.failure_reason == "RuntimeError: primary candidate failure"
 
 
 def test_chmod_failure_is_advisory_and_keeps_valid_frozen_output(
@@ -325,7 +416,13 @@ def test_identical_source_rebuild_has_identical_logical_identities(
     assert first_manifest.source_snapshot_sha256 == second_manifest.source_snapshot_sha256
 
 
-def _production_source(tmp_path: Path, *, unresolved_rights: bool = False) -> Path:
+def _production_source(
+    tmp_path: Path,
+    *,
+    unresolved_rights: bool = False,
+    version: str = "v1_core",
+    purpose: BenchmarkPurpose = BenchmarkPurpose.OUTCOME,
+) -> Path:
     source = tmp_path / "production-source"
     source.mkdir(parents=True)
     fixture_root = Path("tests/fixtures/benchmark_lifecycle/source")
@@ -333,12 +430,12 @@ def _production_source(tmp_path: Path, *, unresolved_rights: bool = False) -> Pa
     converted: list[dict[str, Any]] = []
     for index, line in enumerate(item_lines):
         item = cast(dict[str, Any], json.loads(line))
-        item_id = f"outcome-neutral-{index + 1}"
+        item_id = f"{purpose.value}-neutral-{index + 1}"
         item.update(
             {
                 "item_id": item_id,
-                "purpose": "outcome",
-                "identity_purpose": "outcome",
+                "purpose": purpose.value,
+                "identity_purpose": purpose.value,
                 "engineering_only": False,
                 "scientific_eligible": True,
                 "promotable": True,
@@ -377,8 +474,8 @@ def _production_source(tmp_path: Path, *, unresolved_rights: bool = False) -> Pa
         "manifest_kind": "benchmark_source",
         "lifecycle_state": "SOURCE",
         "source_format": "canonical-jsonl-v1",
-        "benchmark_version": "v1_core",
-        "purpose": "outcome",
+        "benchmark_version": version,
+        "purpose": purpose.value,
         "engineering_only": False,
         "scientific_eligible": True,
         "promotable": True,
@@ -483,13 +580,252 @@ def _production_approval(candidate_path: Path, candidate: CandidateManifest) -> 
     return provisional.model_copy(update={"approval_sha256": freeze_approval_hash(provisional)})
 
 
+def _build_scientific_candidate(
+    tmp_path: Path,
+    repository: Path,
+    *,
+    version: str,
+    purpose: BenchmarkPurpose,
+) -> tuple[Path, CandidateManifest]:
+    source = _production_source(tmp_path, version=version, purpose=purpose)
+    output = resolve_candidate_version_path(repository, version, purpose)
+    result = build_benchmark(
+        source_directory=source,
+        output_directory=output,
+        version=version,
+        purpose=purpose,
+        repository_root=repository,
+    )
+    assert result.manifest_path is not None
+    manifest_path = Path(result.manifest_path)
+    candidate = validate_benchmark_manifest(manifest_path, repository_root=repository)
+    assert isinstance(candidate, CandidateManifest)
+    return manifest_path, candidate
+
+
+def test_outcome_build_to_arbitrary_temporary_directory_is_rejected(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+) -> None:
+    version = "outcome-storage-test-v1"
+    source = _production_source(
+        tmp_path,
+        version=version,
+        purpose=BenchmarkPurpose.OUTCOME,
+    )
+    with pytest.raises(BenchmarkOperationError, match="exact canonical"):
+        build_benchmark(
+            source_directory=source,
+            output_directory=tmp_path / "arbitrary-outcome-candidate",
+            version=version,
+            purpose=BenchmarkPurpose.OUTCOME,
+            repository_root=clean_benchmark_repository,
+        )
+
+
+@pytest.mark.parametrize(
+    ("purpose", "version", "area"),
+    (
+        (BenchmarkPurpose.OUTCOME, "outcome-canonical-test-v1", "private"),
+        (BenchmarkPurpose.RETENTION, "retention-canonical-test-v1", "private"),
+        (BenchmarkPurpose.SELECTION, "selection-canonical-test-v1", "selection"),
+    ),
+)
+def test_non_engineering_build_uses_exact_purpose_specific_candidate_root(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+    purpose: BenchmarkPurpose,
+    version: str,
+    area: str,
+) -> None:
+    manifest_path, candidate = _build_scientific_candidate(
+        tmp_path,
+        clean_benchmark_repository,
+        version=version,
+        purpose=purpose,
+    )
+    assert manifest_path == (
+        clean_benchmark_repository / "benchmarks" / area / version / "candidate_manifest.json"
+    )
+    assert candidate.purpose is purpose
+
+
+def test_cli_non_engineering_build_derives_canonical_output_when_omitted(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = "outcome-cli-derived-location-v1"
+    source = _production_source(
+        tmp_path,
+        version=version,
+        purpose=BenchmarkPurpose.OUTCOME,
+    )
+    monkeypatch.setattr(
+        "unfrozen_schemas.cli.find_repository_root",
+        lambda _path: clean_benchmark_repository,
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "build-benchmark",
+            "--source",
+            str(source),
+            "--version",
+            version,
+            "--purpose",
+            "outcome",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    expected = resolve_candidate_version_path(
+        clean_benchmark_repository,
+        version,
+        BenchmarkPurpose.OUTCOME,
+    )
+    assert (expected / "candidate_manifest.json").is_file()
+
+
+def test_selection_build_outside_selection_root_is_rejected(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+) -> None:
+    version = "selection-outside-test-v1"
+    source = _production_source(
+        tmp_path,
+        version=version,
+        purpose=BenchmarkPurpose.SELECTION,
+    )
+    with pytest.raises(BenchmarkOperationError, match="exact canonical"):
+        build_benchmark(
+            source_directory=source,
+            output_directory=(clean_benchmark_repository / "benchmarks/private" / version),
+            version=version,
+            purpose=BenchmarkPurpose.SELECTION,
+            repository_root=clean_benchmark_repository,
+        )
+
+
+def test_copied_outcome_candidate_cannot_validate_receive_approval_or_freeze(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+) -> None:
+    version = "outcome-copied-test-v1"
+    candidate_path, candidate = _build_scientific_candidate(
+        tmp_path / "source",
+        clean_benchmark_repository,
+        version=version,
+        purpose=BenchmarkPurpose.OUTCOME,
+    )
+    copied_path = tmp_path / "copied-candidate" / "candidate_manifest.json"
+    shutil.copytree(candidate_path.parent, copied_path.parent)
+    with pytest.raises(ValueError, match="outside its canonical"):
+        validate_benchmark_manifest(copied_path, repository_root=clean_benchmark_repository)
+    with pytest.raises(ValueError, match="outside its canonical"):
+        create_engineering_freeze_approval(
+            candidate_manifest_path=copied_path,
+            output_path=tmp_path / "prohibited-approval.json",
+            signer="test-only",
+            repository_root=clean_benchmark_repository,
+        )
+    approval_path = tmp_path / "synthetic-production-approval.json"
+    write_canonical_json(approval_path, _production_approval(copied_path, candidate))
+    with pytest.raises(BenchmarkOperationError, match="outside its canonical"):
+        freeze_benchmark(
+            candidate_manifest_path=copied_path,
+            approval_path=approval_path,
+            output_directory=resolve_frozen_version_path(
+                clean_benchmark_repository,
+                version,
+                BenchmarkPurpose.OUTCOME,
+            ),
+            repository_root=clean_benchmark_repository,
+        )
+
+
+def test_non_engineering_frozen_manifest_is_rejected_outside_canonical_destination(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = "outcome-frozen-location-test-v1"
+    candidate_path, candidate = _build_scientific_candidate(
+        tmp_path / "source",
+        clean_benchmark_repository,
+        version=version,
+        purpose=BenchmarkPurpose.OUTCOME,
+    )
+    approval_path = tmp_path / "production-approval.json"
+    write_canonical_json(approval_path, _production_approval(candidate_path, candidate))
+    with pytest.raises(BenchmarkOperationError, match="exact canonical"):
+        freeze_benchmark(
+            candidate_manifest_path=candidate_path,
+            approval_path=approval_path,
+            output_directory=tmp_path / "outside-frozen-destination",
+            repository_root=clean_benchmark_repository,
+        )
+    frozen_root = resolve_frozen_version_path(
+        clean_benchmark_repository,
+        version,
+        BenchmarkPurpose.OUTCOME,
+    )
+    result = freeze_benchmark(
+        candidate_manifest_path=candidate_path,
+        approval_path=approval_path,
+        output_directory=frozen_root,
+        repository_root=clean_benchmark_repository,
+    )
+    assert result.manifest_path is not None
+    monkeypatch.setattr(
+        "unfrozen_schemas.cli.find_repository_root",
+        lambda _path: clean_benchmark_repository,
+    )
+    version_result = CliRunner().invoke(app, ["validate-benchmark", "--version", version])
+    assert version_result.exit_code == 0, version_result.output
+    assert "; FROZEN;" in version_result.output
+    outside = tmp_path / "copied-frozen"
+    shutil.copytree(frozen_root, outside)
+    with pytest.raises(ValueError, match="frozen manifest is outside its canonical"):
+        validate_benchmark_manifest(
+            outside / "frozen_manifest.json",
+            repository_root=clean_benchmark_repository,
+        )
+
+
+def test_any_selection_purpose_freeze_is_refused_in_m21(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+) -> None:
+    version = "selection-nonreserved-freeze-test-v1"
+    candidate_path, candidate = _build_scientific_candidate(
+        tmp_path / "source",
+        clean_benchmark_repository,
+        version=version,
+        purpose=BenchmarkPurpose.SELECTION,
+    )
+    approval_path = tmp_path / "selection-approval.json"
+    write_canonical_json(approval_path, _production_approval(candidate_path, candidate))
+    with pytest.raises(BenchmarkOperationError, match="SELECTION-purpose freezing is refused"):
+        freeze_benchmark(
+            candidate_manifest_path=candidate_path,
+            approval_path=approval_path,
+            output_directory=(clean_benchmark_repository / "benchmarks/frozen" / version),
+            repository_root=clean_benchmark_repository,
+        )
+
+
 def test_v1_core_freeze_is_refused_even_with_structural_prerequisite_placeholders(
     tmp_path: Path, clean_benchmark_repository: Path
 ) -> None:
     source = _production_source(tmp_path)
+    candidate_root = resolve_candidate_version_path(
+        clean_benchmark_repository,
+        "v1_core",
+        BenchmarkPurpose.OUTCOME,
+    )
     build = build_benchmark(
         source_directory=source,
-        output_directory=tmp_path / "v1-candidate",
+        output_directory=candidate_root,
         version="v1_core",
         purpose=BenchmarkPurpose.OUTCOME,
         repository_root=clean_benchmark_repository,
@@ -507,7 +843,11 @@ def test_v1_core_freeze_is_refused_even_with_structural_prerequisite_placeholder
         freeze_benchmark(
             candidate_manifest_path=candidate_path,
             approval_path=approval_path,
-            output_directory=tmp_path / "v1-frozen",
+            output_directory=resolve_frozen_version_path(
+                clean_benchmark_repository,
+                "v1_core",
+                BenchmarkPurpose.OUTCOME,
+            ),
             repository_root=clean_benchmark_repository,
         )
 
@@ -516,9 +856,14 @@ def test_production_freeze_fails_first_on_unresolved_rights(
     tmp_path: Path, clean_benchmark_repository: Path
 ) -> None:
     source = _production_source(tmp_path, unresolved_rights=True)
+    candidate_root = resolve_candidate_version_path(
+        clean_benchmark_repository,
+        "v1_core",
+        BenchmarkPurpose.OUTCOME,
+    )
     build = build_benchmark(
         source_directory=source,
-        output_directory=tmp_path / "unresolved-candidate",
+        output_directory=candidate_root,
         version="v1_core",
         purpose=BenchmarkPurpose.OUTCOME,
         repository_root=clean_benchmark_repository,
@@ -535,7 +880,11 @@ def test_production_freeze_fails_first_on_unresolved_rights(
         freeze_benchmark(
             candidate_manifest_path=candidate_path,
             approval_path=approval_path,
-            output_directory=tmp_path / "unresolved-frozen",
+            output_directory=resolve_frozen_version_path(
+                clean_benchmark_repository,
+                "v1_core",
+                BenchmarkPurpose.OUTCOME,
+            ),
             repository_root=clean_benchmark_repository,
         )
 
@@ -549,7 +898,7 @@ def test_non_engineering_build_fails_when_a_mandatory_quarantine_root_is_missing
     with pytest.raises(BenchmarkOperationError, match="Quarantine root is missing"):
         build_benchmark(
             source_directory=source,
-            output_directory=tmp_path / "missing-root-candidate",
+            output_directory=(clean_benchmark_repository / "benchmarks/private/v1_core"),
             version="v1_core",
             purpose=BenchmarkPurpose.OUTCOME,
             repository_root=clean_benchmark_repository,
@@ -562,9 +911,14 @@ def test_added_manifest_makes_candidate_and_approval_stale(
     clean_benchmark_repository: Path,
 ) -> None:
     source = _production_source(tmp_path)
+    candidate_root = resolve_candidate_version_path(
+        clean_benchmark_repository,
+        "v1_core",
+        BenchmarkPurpose.OUTCOME,
+    )
     result = build_benchmark(
         source_directory=source,
-        output_directory=tmp_path / "scoped-outcome-candidate",
+        output_directory=candidate_root,
         version="v1_core",
         purpose=BenchmarkPurpose.OUTCOME,
         repository_root=clean_benchmark_repository,
@@ -604,8 +958,10 @@ def test_mandatory_scope_rejects_selection_copy_after_all_ids_are_renamed(
     outcome_source = _production_source(tmp_path / "outcome")
     build_benchmark(
         source_directory=outcome_source,
-        output_directory=(
-            clean_benchmark_repository / "benchmarks/private/existing-outcome-candidate"
+        output_directory=resolve_candidate_version_path(
+            clean_benchmark_repository,
+            "v1_core",
+            BenchmarkPurpose.OUTCOME,
         ),
         version="v1_core",
         purpose=BenchmarkPurpose.OUTCOME,
@@ -615,9 +971,81 @@ def test_mandatory_scope_rejects_selection_copy_after_all_ids_are_renamed(
     with pytest.raises(BenchmarkOperationError, match="Exact displayed model input"):
         build_benchmark(
             source_directory=selection_source,
-            output_directory=tmp_path / "prohibited-selection-copy",
+            output_directory=resolve_candidate_version_path(
+                clean_benchmark_repository,
+                "selection-copy-test-v1",
+                BenchmarkPurpose.SELECTION,
+            ),
             version="selection-copy-test-v1",
             purpose=BenchmarkPurpose.SELECTION,
+            repository_root=clean_benchmark_repository,
+        )
+
+
+def test_validate_benchmark_version_resolves_canonical_selection_candidate(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = "selection-version-resolution-test-v1"
+    _build_scientific_candidate(
+        tmp_path,
+        clean_benchmark_repository,
+        version=version,
+        purpose=BenchmarkPurpose.SELECTION,
+    )
+    monkeypatch.setattr(
+        "unfrozen_schemas.cli.find_repository_root",
+        lambda _path: clean_benchmark_repository,
+    )
+    result = CliRunner().invoke(app, ["validate-benchmark", "--version", version])
+    assert result.exit_code == 0, result.output
+    assert "purpose=selection" in result.output
+
+
+def test_validate_benchmark_version_refuses_ambiguous_candidate_roots(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = "ambiguous-version-resolution-test-v1"
+    candidate_path, _ = _build_scientific_candidate(
+        tmp_path,
+        clean_benchmark_repository,
+        version=version,
+        purpose=BenchmarkPurpose.OUTCOME,
+    )
+    selection_duplicate = clean_benchmark_repository / "benchmarks/selection" / version
+    shutil.copytree(candidate_path.parent, selection_duplicate)
+    monkeypatch.setattr(
+        "unfrozen_schemas.cli.find_repository_root",
+        lambda _path: clean_benchmark_repository,
+    )
+    result = CliRunner().invoke(app, ["validate-benchmark", "--version", version])
+    assert result.exit_code != 0
+    assert "ambiguous across canonical lifecycle roots" in result.output
+
+
+def test_current_lineage_exclusion_does_not_hide_arbitrary_duplicate_manifest(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+) -> None:
+    version = "outcome-lineage-duplicate-test-v1"
+    candidate_path, _ = _build_scientific_candidate(
+        tmp_path,
+        clean_benchmark_repository,
+        version=version,
+        purpose=BenchmarkPurpose.OUTCOME,
+    )
+    shutil.copytree(
+        candidate_path.parent,
+        clean_benchmark_repository
+        / "benchmarks/private"
+        / f".{version}.staging-arbitrary-duplicate",
+    )
+    with pytest.raises(ValueError, match="outside its canonical"):
+        validate_benchmark_manifest(
+            candidate_path,
             repository_root=clean_benchmark_repository,
         )
 

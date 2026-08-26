@@ -65,6 +65,8 @@ from unfrozen_schemas.evaluation.benchmark_models import (
 from unfrozen_schemas.evaluation.benchmark_persistence import (
     read_canonical_model,
     read_jsonl_models,
+    resolve_candidate_version_path,
+    resolve_frozen_version_path,
     resolve_safe_relative_path,
     verify_artifact_records,
 )
@@ -168,6 +170,79 @@ _ENGINEERING_PROHIBITED_WORDS = re.compile(
     r"schema|force|blockage|tether|trajectory)\b",
     flags=re.IGNORECASE,
 )
+
+
+def _require_canonical_candidate_location(
+    manifest_path: Path,
+    candidate: CandidateManifest,
+    repository_root: Path | None,
+    *,
+    allow_canonical_frozen_copy: bool,
+) -> None:
+    """Reject every non-engineering candidate outside its exact canonical location."""
+
+    if candidate.engineering_only:
+        return
+    if repository_root is None:
+        raise ValueError(
+            "Non-engineering candidate validation requires the canonical repository root"
+        )
+    repository = repository_root.resolve()
+    expected = (
+        resolve_candidate_version_path(
+            repository,
+            candidate.benchmark_version,
+            candidate.purpose,
+        )
+        / CANDIDATE_MANIFEST_FILENAME
+    )
+    actual = manifest_path.resolve(strict=True)
+    if actual == expected:
+        return
+    if allow_canonical_frozen_copy and candidate.purpose in {
+        BenchmarkPurpose.OUTCOME,
+        BenchmarkPurpose.RETENTION,
+    }:
+        frozen_copy = (
+            resolve_frozen_version_path(
+                repository,
+                candidate.benchmark_version,
+                candidate.purpose,
+            )
+            / CANDIDATE_MANIFEST_FILENAME
+        )
+        if actual == frozen_copy:
+            return
+    raise ValueError(
+        "Non-engineering candidate manifest is outside its canonical purpose-specific "
+        f"location: expected {expected}"
+    )
+
+
+def _require_canonical_frozen_location(
+    manifest_path: Path,
+    manifest: FrozenManifest,
+    repository_root: Path | None,
+) -> None:
+    """Reject every non-engineering frozen manifest outside its exact version directory."""
+
+    if manifest.engineering_only:
+        return
+    if repository_root is None:
+        raise ValueError("Non-engineering frozen validation requires the canonical repository root")
+    expected = (
+        resolve_frozen_version_path(
+            repository_root.resolve(),
+            manifest.benchmark_version,
+            manifest.purpose,
+        )
+        / FROZEN_MANIFEST_FILENAME
+    )
+    if manifest_path.resolve(strict=True) != expected:
+        raise ValueError(
+            "Non-engineering frozen manifest is outside its canonical location: "
+            f"expected {expected}"
+        )
 
 
 def ensure_lifecycle_transition(before: LifecycleState, after: LifecycleState) -> None:
@@ -601,6 +676,7 @@ def public_manifest(
 
 def _quarantine_manifest_identity(
     manifest_path: Path,
+    repository_root: Path,
 ) -> tuple[
     CandidateManifest | FrozenManifest,
     tuple[BuiltBenchmarkItem, ...],
@@ -608,22 +684,25 @@ def _quarantine_manifest_identity(
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     kind = payload.get("manifest_kind")
     if kind == "benchmark_private_candidate":
+        allow_frozen_copy = (manifest_path.parent / FROZEN_MANIFEST_FILENAME).is_file()
         candidate_manifest, items, _ = _load_candidate_payload(
             manifest_path,
-            repository_root=None,
+            repository_root=repository_root,
             revalidate_quarantine=False,
+            allow_canonical_frozen_copy=allow_frozen_copy,
         )
         return candidate_manifest, items
     if kind == "benchmark_frozen":
         frozen_manifest = _load_frozen_payload(
             manifest_path,
-            repository_root=None,
+            repository_root=repository_root,
             revalidate_quarantine=False,
         )
         _, items, _ = _load_candidate_payload(
             manifest_path.parent / frozen_manifest.candidate_manifest_path,
-            repository_root=None,
+            repository_root=repository_root,
             revalidate_quarantine=False,
+            allow_canonical_frozen_copy=True,
         )
         return frozen_manifest, items
     raise ValueError(f"Unsupported manifest in mandatory quarantine scope: {manifest_path}")
@@ -632,11 +711,33 @@ def _quarantine_manifest_identity(
 def _is_current_candidate_lineage(
     manifest_path: Path,
     *,
+    repository_root: Path,
     candidate_bundle_root_sha256: str | None,
     benchmark_version: str | None,
     purpose: BenchmarkPurpose | None,
 ) -> bool:
-    if candidate_bundle_root_sha256 is None:
+    if (
+        candidate_bundle_root_sha256 is None
+        or benchmark_version is None
+        or purpose is None
+        or purpose is BenchmarkPurpose.ENGINEERING
+    ):
+        return False
+    canonical_paths = {
+        (
+            resolve_candidate_version_path(repository_root, benchmark_version, purpose)
+            / CANDIDATE_MANIFEST_FILENAME
+        ).resolve()
+    }
+    if purpose in {BenchmarkPurpose.OUTCOME, BenchmarkPurpose.RETENTION}:
+        frozen_root = resolve_frozen_version_path(repository_root, benchmark_version, purpose)
+        canonical_paths.update(
+            {
+                (frozen_root / CANDIDATE_MANIFEST_FILENAME).resolve(),
+                (frozen_root / FROZEN_MANIFEST_FILENAME).resolve(),
+            }
+        )
+    if manifest_path.resolve(strict=True) not in canonical_paths:
         return False
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -656,6 +757,7 @@ def create_quarantine_scope(
     current_candidate_bundle_root_sha256: str | None = None,
     current_benchmark_version: str | None = None,
     current_purpose: BenchmarkPurpose | None = None,
+    transient_staging_roots: Sequence[Path] = (),
 ) -> QuarantineScope:
     """Scan every mandatory canonical root and bind all external manifest identities."""
 
@@ -672,6 +774,19 @@ def create_quarantine_scope(
         )
     if declaration.canonical_roots != CANONICAL_QUARANTINE_ROOTS:
         raise ValueError("Mandatory quarantine scope omits one or more canonical roots")
+    resolved_transient_roots: tuple[Path, ...] = tuple(
+        staging.resolve(strict=True) for staging in transient_staging_roots
+    )
+    canonical_root_paths = tuple(
+        (repository / declared_root).resolve() for declared_root in declaration.canonical_roots
+    )
+    for staging in resolved_transient_roots:
+        if (
+            not staging.is_dir()
+            or ".staging-" not in staging.name
+            or staging.parent not in canonical_root_paths
+        ):
+            raise ValueError(f"Invalid transient quarantine-scan staging root: {staging}")
     manifest_paths: set[Path] = set()
     for declared_root in declaration.canonical_roots:
         try:
@@ -689,17 +804,20 @@ def create_quarantine_scope(
                 resolved = manifest_path.resolve(strict=True)
                 if not resolved.is_relative_to(root):
                     raise ValueError(f"Quarantine manifest escapes its root: {manifest_path}")
+                if any(resolved.is_relative_to(staging) for staging in resolved_transient_roots):
+                    continue
                 manifest_paths.add(resolved)
     references: list[QuarantineManifestReference] = []
     for manifest_path in sorted(manifest_paths, key=lambda path: path.as_posix()):
         if _is_current_candidate_lineage(
             manifest_path,
+            repository_root=repository,
             candidate_bundle_root_sha256=current_candidate_bundle_root_sha256,
             benchmark_version=current_benchmark_version,
             purpose=current_purpose,
         ):
             continue
-        manifest, items = _quarantine_manifest_identity(manifest_path)
+        manifest, items = _quarantine_manifest_identity(manifest_path, repository)
         relative = manifest_path.relative_to(repository).as_posix()
         references.append(
             QuarantineManifestReference(
@@ -776,6 +894,7 @@ def verify_quarantine_scope(
     repository_root: Path | None,
     candidate: CandidateManifest,
     items: Sequence[BuiltBenchmarkItem],
+    transient_staging_roots: Sequence[Path] = (),
 ) -> None:
     if quarantine_scope_hash(scope) != scope.quarantine_scope_sha256:
         raise ValueError("Quarantine scope logical hash mismatch")
@@ -795,6 +914,7 @@ def verify_quarantine_scope(
             current_candidate_bundle_root_sha256=candidate.candidate_bundle_root_sha256,
             current_benchmark_version=candidate.benchmark_version,
             current_purpose=candidate.purpose,
+            transient_staging_roots=transient_staging_roots,
         )
         if observed != scope:
             raise ValueError(
@@ -871,8 +991,18 @@ def _load_candidate_payload(
     *,
     repository_root: Path | None = None,
     revalidate_quarantine: bool = True,
+    enforce_storage_location: bool = True,
+    allow_canonical_frozen_copy: bool = False,
+    transient_staging_roots: Sequence[Path] = (),
 ) -> tuple[CandidateManifest, tuple[BuiltBenchmarkItem, ...], tuple[PrivateAnswerRecord, ...]]:
     manifest = read_canonical_model(manifest_path, CandidateManifest)
+    if enforce_storage_location:
+        _require_canonical_candidate_location(
+            manifest_path,
+            manifest,
+            repository_root,
+            allow_canonical_frozen_copy=allow_canonical_frozen_copy,
+        )
     root = manifest_path.parent.resolve()
     verify_artifact_records(root, manifest.artifacts, expected_paths=CANDIDATE_ARTIFACT_PATHS)
     snapshot = read_canonical_model(root / manifest.source_snapshot_path, SourceSnapshot)
@@ -992,6 +1122,7 @@ def _load_candidate_payload(
             repository_root=repository_root,
             candidate=manifest,
             items=items,
+            transient_staging_roots=transient_staging_roots,
         )
     else:
         if quarantine_scope_hash(scope) != scope.quarantine_scope_sha256:
@@ -1070,6 +1201,8 @@ def _validate_freeze_eligibility(
             ):
                 raise ValueError("Engineering freeze item is not unmistakably non-scientific")
         return
+    if candidate.purpose is BenchmarkPurpose.SELECTION:
+        raise ValueError("SELECTION-purpose freezing is refused throughout M2.1")
     for item in items:
         if item.provenance.rights_status not in {RightsStatus.CLEARED, RightsStatus.LICENSED}:
             raise ValueError("Production freeze requires resolved rights/licensing for every item")
@@ -1135,8 +1268,11 @@ def _load_frozen_payload(
     *,
     repository_root: Path | None = None,
     revalidate_quarantine: bool = True,
+    enforce_storage_location: bool = True,
 ) -> FrozenManifest:
     manifest = read_canonical_model(manifest_path, FrozenManifest)
+    if enforce_storage_location:
+        _require_canonical_frozen_location(manifest_path, manifest, repository_root)
     root = manifest_path.parent.resolve()
     verify_artifact_records(
         root,
@@ -1150,6 +1286,8 @@ def _load_frozen_payload(
         candidate_path,
         repository_root=repository_root,
         revalidate_quarantine=revalidate_quarantine,
+        enforce_storage_location=enforce_storage_location,
+        allow_canonical_frozen_copy=True,
     )
     approval = read_canonical_model(root / manifest.freeze_approval_path, FreezeApproval)
     verify_freeze_approval(candidate_path, candidate, items, approval)
@@ -1243,6 +1381,7 @@ def validate_benchmark_manifest(
         _, current_items, _ = _load_candidate_payload(
             manifest_path.parent / frozen_result.candidate_manifest_path,
             repository_root=repository_root,
+            allow_canonical_frozen_copy=True,
         )
     else:
         raise ValueError(f"Unsupported benchmark manifest kind: {kind!r}")
@@ -1261,6 +1400,7 @@ def validate_benchmark_manifest(
             _, other_items, _ = _load_candidate_payload(
                 other_path.parent / other_frozen.candidate_manifest_path,
                 repository_root=repository_root,
+                allow_canonical_frozen_copy=True,
             )
         else:
             raise ValueError(f"Unsupported quarantine manifest: {other_path}")

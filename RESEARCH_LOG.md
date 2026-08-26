@@ -153,6 +153,22 @@ then protect those private semantics even against coordinated manifest edits. Th
 integrity corrections before benchmark authoring or treatment results, not new benchmark content,
 scientific findings, or changes to the experimental design.
 
+### 2026-08-26 — The quarantine universe requires canonical membership
+
+A complete manifest scan cannot protect a scientific candidate stored outside every scanned root.
+M2.1 therefore treats canonical repository membership as a necessary precondition for quarantine:
+outcome and retention candidates inhabit the private root, selection candidates inhabit their
+separate selection root, and eligible frozen outcome/retention versions inhabit the frozen root.
+Content fingerprints and scope hashes still determine cross-purpose equivalence; location is not
+itself scientific identity and never enters logical hashes.
+
+This closes an evasion path without scanning arbitrary disks or owner directories. Any
+non-engineering artifact capable of approval or freeze must first be a member of the complete
+repository quarantine universe. Selection freeze remains disabled until M2.5 reviews a procedure,
+and atomic PRIVATE publication now fails closed for the same reason as FROZEN publication: a command
+must not report failure while leaving a valid artifact at the requested governed destination. This
+is methodological integrity rationale, not benchmark content or a Phase I result.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>
