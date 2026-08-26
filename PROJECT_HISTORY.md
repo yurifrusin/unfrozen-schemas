@@ -207,6 +207,29 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Advancement decision: M2.2 is the next authorised work package, but it was not begun by this
   closeout. No real benchmark-item authoring, model, tokenizer, training, GPU, or EPS work occurred.
 
+### 2026-08-26 — Milestone 2 M2.2 literal/counterfactual implementation branch
+
+- Began from clean canonical `main` at
+  `ee6fff36317665ce729c870c858f273a6b348894`, after verifying the M2.1 implementation merge
+  `90c3428f70e03c3cf31e3e2309a65a2340f41cd1`, the published Milestone 1 tag/release, the active
+  `main` ruleset, and passing canonical CI.
+- Branch: `codex/milestone-2-m2-2-literal-counterfactuals`.
+- Added strict separately versioned M2.2 records and hash domains layered over the unchanged M2.1
+  source/candidate contracts; deterministic typed source generation; independent actual and
+  counterfactual Core replay; reverse-pair, split, lexical-cue, and provenance validation; composite
+  M2.1/M2.2 identity; private review bundles and renders; CLI/configuration; and CPU/offline tests.
+- Added a tracked non-scientific engineering fixture using synthetic status-code wording. It is
+  non-promotable and contains no real candidate prompt, target-domain item, model, scorer, or GPU
+  dependency.
+- The real provisional candidate identity is `m2-2-literal-candidate-v1`, purpose `outcome`, with
+  private ignored source, candidate, and review roots. Its generation is deliberately deferred until
+  the tracked branch is final, pushed, clean, and CI-green.
+- Revision 6 `CODEX_SPEC.md` remained unchanged at SHA-256
+  `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`.
+- Status: implementation in progress. No merge, tag, release, freeze, human recruitment, model/GPU
+  run, treatment, scientific result, Phase I gate decision, M2.3 work, or EPS-worktree change has
+  occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

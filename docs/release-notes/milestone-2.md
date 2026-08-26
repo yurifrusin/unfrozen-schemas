@@ -32,7 +32,12 @@
   fail-closed post-rename handling as FROZEN publication. It contains no real benchmark item.
   The engineering fixture is regression evidence for the lifecycle implementation only and is not
   scientific benchmark evidence. No empirical LLM result is claimed.
-- **M2.2 — literal/counterfactual families:** pending.
+- **M2.2 — literal/counterfactual families:** implementation in progress on the dedicated M2.2
+  branch. The branch adds deterministic private typed authoring, independent SchemaWorld replay,
+  strict L1/L2 partitions, exact reverse variants, split/cue audits, M2.1 composite binding, private
+  review manifests/renders, CLI, CPU/offline engineering fixtures, tests, and CI. The real outcome
+  candidate is generated only after the final tracked head is clean, pushed, and CI-green. Owner
+  review, merge, closeout, human validation, rights, ethics, M2.3-M2.5, and `v1_core` remain pending.
 - **M2.3 — abstract/metaphorical families:** pending.
 - **M2.4 — scoring, option order, leakage, retention:** pending.
 - **M2.5 — RTX 5070 qualification/model selection and `selection_probe_v1`:** pending.

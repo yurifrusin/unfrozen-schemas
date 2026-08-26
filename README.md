@@ -21,6 +21,7 @@ CPU-only development continues through M2.4. M2.5 moves the project to the owner
 - `docs/scientific-design.md` — operational summary of the three phases.
 - `docs/implementation-plan.md` — dependency-ordered work packages.
 - `docs/phase-gate-protocol.md` — Phase I gate semantics and hash chain.
+- `docs/literal-benchmark.md` — M2.2 private literal/counterfactual candidate workflow.
 - `docs/budget-accounting.md` — resource-accounting definitions.
 - `docs/release-and-archive-process.md` — branch, PR, merge, tag, release, and archive workflow.
 - `docs/document-ingest-workflow.md` — controlled handling of downloaded Markdown documents.
@@ -78,6 +79,33 @@ uv run unfrozen audit-benchmark-git
 The tracked fixture is non-scientific and non-promotable. M2.1 contains no outcome or selection
 item, does no scoring/model/GPU work, and cannot freeze production `v1_core`. See
 `docs/benchmark-lifecycle.md` and the unfilled `docs/benchmark-card.md` template.
+
+M2.2 literal-benchmark engineering smoke:
+
+```powershell
+uv run unfrozen generate-literal-source `
+  --config configs/evaluation/m2_2_literal_smoke.yaml `
+  --source <isolated-source-output>
+uv run unfrozen validate-literal-source --source <isolated-source-output>
+uv run unfrozen build-benchmark `
+  --source <isolated-source-output> `
+  --output <isolated-candidate-output> `
+  --version engineering-literal-fixture-v1 `
+  --purpose engineering
+uv run unfrozen validate-literal-benchmark `
+  --source <isolated-source-output> `
+  --candidate-manifest <isolated-candidate-output>/candidate_manifest.json
+uv run unfrozen build-literal-review `
+  --source <isolated-source-output> `
+  --output <isolated-review-output>
+uv run unfrozen validate-literal-review `
+  --source <isolated-source-output> `
+  --review <isolated-review-output>
+```
+
+This fixture uses synthetic status codes and real Core replay only. It contains no candidate wording,
+does no scoring/model/GPU work, and cannot freeze or approve `v1_core`. The real M2.2 outcome source,
+candidate, and review bundle remain ignored and local. See `docs/literal-benchmark.md`.
 
 Non-engineering source manifests must declare the complete canonical benchmark quarantine scan;
 the resulting scope is hash-bound through candidates, approvals, operations, and frozen manifests.

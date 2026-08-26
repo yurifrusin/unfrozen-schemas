@@ -169,6 +169,32 @@ and atomic PRIVATE publication now fails closed for the same reason as FROZEN pu
 must not report failure while leaving a valid artifact at the requested governed destination. This
 is methodological integrity rationale, not benchmark content or a Phase I result.
 
+### 2026-08-26 — Literal answers require replayable causal witnesses, not authored labels
+
+M2.2 treats a literal benchmark answer as a derived consequence of a typed Core state/action pair,
+not as an authoritative field supplied by an author. Each semantic group therefore binds actual and
+counterfactual states, actions, transitions, relations, declared differences, outcomes, and stable
+option identity in one witness. Validation independently replays both plans and derives the answer
+before checking the private answer record. Reverse-option variants change presentation only.
+
+This design separates three identities that serve different purposes: the unchanged M2.1 lifecycle
+root isolates answers and benchmark purpose; the M2.2 composite root binds literal scientific
+structure and audits; and the review manifest binds exact local inspection files. Timestamped
+operation/platform provenance remains retained but does not perturb cross-platform logical identity.
+The exact M2.1 candidate-manifest file and clean Git head remain explicit owner-review facts rather
+than being mistaken for simulator semantics.
+
+L2 novelty is declared structurally and rejects new-name/new-seed-only claims. Cue auditing records
+necessary causal terms as reviewed findings while failing raw identifiers, hashes, coordinates,
+unbalanced general templates/actions/mechanisms, and duplicate groups. Broader treatment overlap is
+explicitly `not_assessed_m2_2`; M2.2 cannot infer that future treatment text is disjoint before M2.4
+implements that comparison.
+
+The outcome remains a private candidate pending owner content review, publication-quality human
+validation, rights and ethics decisions, and M2.3-M2.6. Simulator agreement supports answer
+correctness for the declared toy physics; it does not establish naturalness, construct validity for
+humans, model learning, transfer, or any Phase I gate result.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>
