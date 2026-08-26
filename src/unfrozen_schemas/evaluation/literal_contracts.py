@@ -24,6 +24,7 @@ from unfrozen_schemas.evaluation.literal_models import (
     LiteralStructuralSignatures,
     LiteralTaskFamily,
     LiteralTemplate,
+    LiteralWitnessRecord,
     SupportScenarioCase,
 )
 
@@ -193,7 +194,7 @@ def intervention_contract(
     return _CONTRACTS[case]
 
 
-def source_mechanism(
+def target_mechanism(
     case: ContainmentScenarioCase | SupportScenarioCase,
 ) -> LiteralMechanismKind:
     return _MECHANISMS[case]
@@ -302,7 +303,7 @@ def action_summary(
         assert side is not None
         return f"the object moves outward through the {side.value} side"
     if action.kind in {ActionKind.NOOP, ActionKind.WAIT}:
-        return "the arrangement is left unchanged"
+        return "the setup is observed without removing or changing anything"
     if action.kind is ActionKind.REMOVE_SUPPORT:
         return (
             "the lower platform is removed"
@@ -350,16 +351,19 @@ def _task_question(family: LiteralTaskFamily) -> str:
         LiteralTaskFamily.MATCHED_COUNTERFACTUAL: (
             "Which outcome occurs in the actual setup rather than the matched alternative?"
         ),
-        LiteralTaskFamily.NOVEL_TEMPLATE: (
-            "Using this held-out literal question form, which outcome follows?"
-        ),
-        LiteralTaskFamily.NOVEL_CONFIGURATION: (
-            "For this structurally novel literal configuration, which outcome follows?"
-        ),
-        LiteralTaskFamily.PHYSICAL_ANALOGY: (
-            "Which outcome preserves the stated physical mechanism?"
-        ),
+        LiteralTaskFamily.NOVEL_TEMPLATE: ("What is the object's outcome?"),
+        LiteralTaskFamily.NOVEL_CONFIGURATION: ("What happens to the object?"),
+        LiteralTaskFamily.PHYSICAL_ANALOGY: ("What happens to the object?"),
     }[family]
+
+
+def _outcome_clause(outcome: LiteralOutcomeCode) -> str:
+    return {
+        LiteralOutcomeCode.MOVEMENT_SUCCEEDS: "the object completes the attempted movement",
+        LiteralOutcomeCode.MOVEMENT_BLOCKED: "the object remains blocked",
+        LiteralOutcomeCode.OBJECT_FALLS: "the object moves downward",
+        LiteralOutcomeCode.OBJECT_STAYS: "the object remains elevated",
+    }[outcome]
 
 
 def narrative_facts(
@@ -368,12 +372,27 @@ def narrative_facts(
     counterfactual_state: WorldState,
     actual_actions: Sequence[Action],
     counterfactual_actions: Sequence[Action],
+    *,
+    analogy_source: LiteralWitnessRecord | None = None,
 ) -> LiteralNarrativeFacts:
     if len(actual_actions) != 1 or len(counterfactual_actions) != 1:
         raise ValueError("Literal narrative renderer supports the prospectively allowed horizon")
-    mechanism = source_mechanism(spec.scenario_case)
+    target = target_mechanism(spec.scenario_case)
+    if spec.task_family is LiteralTaskFamily.PHYSICAL_ANALOGY:
+        if analogy_source is None:
+            raise ValueError("Physical analogy narrative requires its declared L1 source witness")
+        source = analogy_source.target_mechanism
+        source_mapping_clause = (
+            f"{analogy_source.narrative_facts.actual_scene_clause}; when "
+            f"{analogy_source.narrative_facts.actual_action_summary}, "
+            f"{_outcome_clause(analogy_source.actual_outcome_code)}"
+        )
+    else:
+        if analogy_source is not None:
+            raise ValueError("Only physical analogies may receive a source witness")
+        source = target
+        source_mapping_clause = None
     return LiteralNarrativeFacts(
-        scene_name=spec.scene_name,
         schema_identity=spec.schema_identity,
         transfer_level=spec.transfer_level,
         task_family=spec.task_family,
@@ -381,7 +400,8 @@ def narrative_facts(
         side=spec.side,
         direction=spec.direction,
         intervention_kind=spec.intervention_kind,
-        source_mechanism=mechanism,
+        source_mechanism=source,
+        target_mechanism=target,
         actual_scene_clause=_scene_clause(
             spec.schema_identity, actual_state, spec.side, spec.direction
         ),
@@ -392,7 +412,7 @@ def narrative_facts(
         counterfactual_action_summary=action_summary(
             counterfactual_actions[0], counterfactual_state, side=spec.side
         ),
-        mechanism_summary=_mechanism_summary(mechanism),
+        source_mapping_clause=source_mapping_clause,
         task_family_question=_task_question(spec.task_family),
         instructions="Choose exactly one literal outcome.",
     )
@@ -423,42 +443,45 @@ def render_literal_prompt(template: LiteralTemplate, facts: LiteralNarrativeFact
             SupportScenarioCase.NONBEARING_TETHER: "the upper link carries no load",
         }[facts.scenario_case]
         return (
-            f"{facts.scene_name}. An object begins at the designated start; {condition}. "
-            "Apply the stated single step. "
-            + facts.task_family_question.replace("physical mechanism", "fixture rule")
+            f"Consider the following physical setup. The object begins at the designated start, "
+            f"and {condition}. Apply the stated single step. {facts.task_family_question}"
         )
     if facts.task_family is LiteralTaskFamily.DIRECT_OUTCOME:
         prompt = (
-            f"In {facts.scene_name}, {facts.actual_scene_clause}. "
+            f"Consider the following physical setup. {facts.actual_scene_clause.capitalize()}. "
             f"Then {facts.actual_action_summary}. {facts.task_family_question}"
         )
     elif facts.task_family is LiteralTaskFamily.INTERVENTION_CONSEQUENCE:
         prompt = (
-            f"In {facts.scene_name}, {facts.actual_scene_clause}. "
-            f"The intervention is that {facts.actual_action_summary}. "
+            f"Consider the following physical setup. {facts.actual_scene_clause.capitalize()}. "
+            f"Now {facts.actual_action_summary}. "
             f"{facts.task_family_question}"
         )
     elif facts.task_family is LiteralTaskFamily.MATCHED_COUNTERFACTUAL:
         prompt = (
-            f"In {facts.scene_name}, the actual setup has {facts.actual_scene_clause}, and "
-            f"{facts.actual_action_summary}. The matched alternative has "
-            f"{facts.counterfactual_scene_clause}, and {facts.counterfactual_action_summary}. "
+            "Consider two otherwise matched physical setups. In the actual setup, "
+            f"{facts.actual_scene_clause}; {facts.actual_action_summary}. "
+            "In the alternative setup, "
+            f"{facts.counterfactual_scene_clause}; {facts.counterfactual_action_summary}. "
             f"{facts.task_family_question}"
         )
     elif facts.task_family is LiteralTaskFamily.NOVEL_TEMPLATE:
         prompt = (
-            f"Consider {facts.scene_name}: {facts.actual_scene_clause}; then "
+            f"A physical setup is described as follows: {facts.actual_scene_clause}. Next, "
             f"{facts.actual_action_summary}. {facts.task_family_question}"
         )
     elif facts.task_family is LiteralTaskFamily.NOVEL_CONFIGURATION:
         prompt = (
-            f"In {facts.scene_name}, {facts.actual_scene_clause}. After "
-            f"{facts.actual_action_summary}, {facts.task_family_question}"
+            f"Consider the following physical setup. {facts.actual_scene_clause.capitalize()}. "
+            f"After {facts.actual_action_summary}, {facts.task_family_question[0].lower()}"
+            f"{facts.task_family_question[1:]}"
         )
     else:
+        if facts.source_mapping_clause is None:
+            raise ValueError("Physical analogy facts lack an operational source mapping")
         prompt = (
-            f"In {facts.scene_name}, {facts.mechanism_summary}. Specifically, "
-            f"{facts.actual_scene_clause}, and {facts.actual_action_summary}. "
+            f"In a reference setup, {facts.source_mapping_clause}. Apply the same causal pattern "
+            f"to another setup: {facts.actual_scene_clause}; then {facts.actual_action_summary}. "
             f"{facts.task_family_question}"
         )
     canonical = " ".join(prompt.split())
@@ -552,6 +575,8 @@ def structural_signatures(
     counterfactual_actions: Sequence[Action],
     actual_outcome: LiteralOutcomeCode,
     counterfactual_outcome: LiteralOutcomeCode,
+    *,
+    analogy_source: LiteralWitnessRecord | None = None,
 ) -> LiteralStructuralSignatures:
     """Create seed-, ID-, and filesystem-independent prospective signatures."""
 
@@ -580,7 +605,7 @@ def structural_signatures(
     }
     mechanism_payload = {
         "schema": spec.schema_identity.value,
-        "mechanism": source_mechanism(spec.scenario_case).value,
+        "mechanism": target_mechanism(spec.scenario_case).value,
         "actual_action": action_payload["actual"],
         "counterfactual_action": action_payload["counterfactual"],
         "actual_outcome": actual_outcome.value,
@@ -596,7 +621,15 @@ def structural_signatures(
     counterfactual_hash = structural_signature_hash(
         "counterfactual-intervention", counterfactual_payload
     )
-    mechanism_hash = structural_signature_hash("source-mechanism", mechanism_payload)
+    target_mechanism_hash = structural_signature_hash("mechanism-identity", mechanism_payload)
+    if spec.task_family is LiteralTaskFamily.PHYSICAL_ANALOGY:
+        if analogy_source is None:
+            raise ValueError("Physical analogy signatures require the declared L1 source witness")
+        source_mechanism_hash = analogy_source.structural_signatures.target_mechanism_sha256
+    else:
+        if analogy_source is not None:
+            raise ValueError("Only physical analogies may receive a source witness")
+        source_mechanism_hash = target_mechanism_hash
     template_identity = structural_signature_hash(
         "prompt-template",
         {"template_id": template.template_id, "template_sha256": template_hash(template)},
@@ -609,22 +642,60 @@ def structural_signatures(
             "geometry": geometry_hash,
             "action": action_hash,
             "counterfactual": counterfactual_hash,
-            "mechanism": mechanism_hash,
+            "target_mechanism": target_mechanism_hash,
             "observation": observation_hash,
+        },
+    )
+    causal_scenario_hash = structural_signature_hash(
+        "causal-scenario", {"configuration": configuration_hash}
+    )
+    episode_hashes = tuple(
+        sorted(
+            (
+                structural_signature_hash(
+                    "structural-stratum-episode",
+                    {
+                        "topology": topology_payload[role],
+                        "geometry": geometry_payload[role],
+                        "action": action_payload[role],
+                        "observation": observation_payload[role],
+                        "outcome": outcome.value,
+                    },
+                )
+                for role, outcome in (
+                    ("actual", actual_outcome),
+                    ("counterfactual", counterfactual_outcome),
+                )
+            )
+        )
+    )
+    structural_stratum_hash = structural_signature_hash(
+        "structural-stratum",
+        {
+            "schema": spec.schema_identity.value,
+            "causal_factor": contract.causal_factor.value,
+            "episodes": episode_hashes,
         },
     )
     witness_configuration_hash = structural_signature_hash(
         "witness-configuration",
-        {"configuration": configuration_hash, "template": template_identity},
+        {
+            "causal_scenario": causal_scenario_hash,
+            "source_mechanism": source_mechanism_hash,
+            "template": template_identity,
+        },
     )
     return LiteralStructuralSignatures(
         world_topology_sha256=world_hash,
         qualitative_geometry_sha256=geometry_hash,
         action_plan_sha256=action_hash,
         counterfactual_intervention_sha256=counterfactual_hash,
-        source_mechanism_sha256=mechanism_hash,
+        source_mechanism_sha256=source_mechanism_hash,
+        target_mechanism_sha256=target_mechanism_hash,
         prompt_template_sha256=template_identity,
         observation_structure_sha256=observation_hash,
         configuration_sha256=configuration_hash,
+        causal_scenario_sha256=causal_scenario_hash,
+        structural_stratum_sha256=structural_stratum_hash,
         witness_configuration_sha256=witness_configuration_hash,
     )

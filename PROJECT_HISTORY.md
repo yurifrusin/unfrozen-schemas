@@ -255,6 +255,27 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
   remain provisional and will be regenerated only from the final pushed, clean, CPU-green head. No
   merge, tag, release, freeze, M2.3, model/GPU, treatment, or EPS-worktree work occurred.
 
+### 2026-08-26 — M2.2 independent scientific-review correction round
+
+- Continued pull request `#7` from exact reviewed head
+  `6644e47b6af06e84c0e08804aa25b0a588fdf8c4` after clean branch/upstream, canonical-base,
+  pull-request, and protected CPU-check preflight.
+- Implemented the six stable scientific-review findings as `IMPLEMENTED_PENDING_VERIFICATION`:
+  explicit source/target mechanism transfer with complete prohibited-source comparison; separate
+  question, causal-scenario, structural-stratum, matched-variant, and cosmetic-variant accounting;
+  natural typed wording; prospectively parallel option forms; finite support-aware category-bound
+  lexical review; and retained full-frame plus deterministic zoom review renders.
+- Added exact six-family wording, causal-identity invariance, all-L1/prospective-source mutation,
+  option-confound, lexical-category, and decoded review-zoom regressions. Tokenizer-specific option
+  length remains an explicit pending M2.4 obligation.
+- Local locked sync, Ruff lint/format, strict mypy, all 318 tests, offline smoke, fresh Core
+  generation/validation/replay, the corrected M2.2 engineering lifecycle, and benchmark Git audit
+  passed. The M2.1 engineering build/validation passed; its approval correctly refused the dirty
+  pre-commit tree and is scheduled for clean-head repetition.
+- Status: the bounded correction commit, exact-head protected CI, clean-head M2.1 completion, and
+  private artifact regeneration remain pending in this correction task. No merge, tag, release,
+  production freeze, M2.3, model/GPU, treatment, or EPS work occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

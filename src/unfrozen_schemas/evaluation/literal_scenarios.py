@@ -21,8 +21,8 @@ from unfrozen_schemas.envs.schema_world.state import (
 from unfrozen_schemas.evaluation.literal_contracts import (
     intervention_contract,
     narrative_facts,
-    source_mechanism,
     structural_signatures,
+    target_mechanism,
 )
 from unfrozen_schemas.evaluation.literal_hashing import witness_hash
 from unfrozen_schemas.evaluation.literal_models import (
@@ -31,6 +31,7 @@ from unfrozen_schemas.evaluation.literal_models import (
     LiteralOutcomeCode,
     LiteralScenarioSpec,
     LiteralSchema,
+    LiteralTaskFamily,
     LiteralTemplate,
     LiteralTransferLevel,
     LiteralWitnessRecord,
@@ -395,7 +396,21 @@ def correct_option_id_for_outcome(outcome_code: LiteralOutcomeCode) -> str:
     return outcome_code.value
 
 
-def build_witness(spec: LiteralScenarioSpec, template: LiteralTemplate) -> LiteralWitnessRecord:
+def build_witness(
+    spec: LiteralScenarioSpec,
+    template: LiteralTemplate,
+    *,
+    analogy_source: LiteralWitnessRecord | None = None,
+) -> LiteralWitnessRecord:
+    requires_source = spec.task_family is LiteralTaskFamily.PHYSICAL_ANALOGY
+    if requires_source != (analogy_source is not None):
+        raise ValueError("Physical analogy witness construction requires exactly one L1 source")
+    if analogy_source is not None and (
+        analogy_source.semantic_group_id != spec.analogy_reference_group_id
+        or analogy_source.transfer_level is not LiteralTransferLevel.L1
+        or analogy_source.schema_identity is not spec.schema_identity
+    ):
+        raise ValueError("Physical analogy source witness does not match its declaration")
     actual_initial, counterfactual_initial, actual_actions, counterfactual_actions = scenario_plans(
         spec
     )
@@ -421,6 +436,7 @@ def build_witness(spec: LiteralScenarioSpec, template: LiteralTemplate) -> Liter
         counterfactual_actions,
         actual_outcome,
         counterfactual_outcome,
+        analogy_source=analogy_source,
     )
     facts = narrative_facts(
         spec,
@@ -428,6 +444,7 @@ def build_witness(spec: LiteralScenarioSpec, template: LiteralTemplate) -> Liter
         counterfactual_initial,
         actual_actions,
         counterfactual_actions,
+        analogy_source=analogy_source,
     )
     provisional = LiteralWitnessRecord(
         semantic_group_id=spec.semantic_group_id,
@@ -435,7 +452,12 @@ def build_witness(spec: LiteralScenarioSpec, template: LiteralTemplate) -> Liter
         schema_identity=spec.schema_identity,
         transfer_level=spec.transfer_level,
         task_family=spec.task_family,
-        source_mechanism=source_mechanism(spec.scenario_case),
+        source_mechanism=(
+            analogy_source.target_mechanism
+            if analogy_source is not None
+            else target_mechanism(spec.scenario_case)
+        ),
+        target_mechanism=target_mechanism(spec.scenario_case),
         prompt_template_id=spec.prompt_template_id,
         partition=spec.partition,
         scenario_case=spec.scenario_case,

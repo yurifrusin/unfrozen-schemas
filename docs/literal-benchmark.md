@@ -23,8 +23,9 @@ The following remain outside M2.2:
 - any Phase I gate status or empirical LLM claim.
 
 The prospective adaptation strata, semantic-group IDs, and prompt-template IDs are reserved before
-treatment authoring. M2.2 records future treatment overlap as `not_assessed_m2_2`; it never treats an
-empty field as evidence that overlap was checked.
+treatment authoring. The retained snapshot also declares the complete prospective adaptation-source
+mechanism-signature set. M2.2 records future treatment overlap as `not_assessed_m2_2`; it never
+treats an empty field as evidence that overlap was checked.
 
 ## Private storage and execution order
 
@@ -57,6 +58,13 @@ contracts; Core state/action records derive narrative facts and outcomes; each o
 explicitly mapped to one typed outcome code. Closed versioned renderers accept only reconstructed
 `LiteralNarrativeFacts`. The generator is deterministic and never calls an LLM.
 
+The renderer uses the constant neutral referent `the object` in prompts and options. Scene labels
+remain private authoring metadata and are never model-visible. Natural questions do not announce
+held-out, novel, or transfer status. Physical analogy prompts state a source causal episode and ask
+for the outcome in a distinct target episode; they do not state the target mechanism as the answer.
+All option pairs use prospectively parallel sentence form, punctuation, modality, and closely
+matched whitespace length. Tokenizer-specific length checks remain an explicit pending M2.4 duty.
+
 Model-visible content is rejected if it contains raw entity/boundary/opening/tether IDs, 64-character
 hashes, raw four-digit coordinates, privileged machine schema labels, transition fields, or abstract/
 metaphorical target-domain vocabulary. The private outcome wording may use necessary natural
@@ -79,7 +87,8 @@ ethics remain unresolved, human validation is `not_started` with zero validators
 ## Witness and independent verification
 
 One `LiteralWitnessRecord` binds every semantic group to both item IDs, explicit schema, level,
-family, typed mechanism, prompt template, partition, intervention contract, structural signatures,
+family, separate typed source and target mechanisms, prompt template, partition, intervention
+contract, structural signatures,
 reconstructed narrative facts, seeds, actual and counterfactual states/actions, observations,
 transitions, relations, observed differences, outcome codes, stable correct option, and witness hash.
 
@@ -95,19 +104,29 @@ any bound semantic field fails even when affected hashes are refreshed.
 
 The deterministic lexical audit normalises Unicode, line endings, whitespace, and case; checks raw
 identifier/hash/coordinate exclusion, option length and answer-position balance, exact and near
-duplicates, template/action/mechanism answer classes, and per-family token/outcome associations.
-The causal-term allowlist is explicit and versioned. Perfect unigram/bigram, template, action, or
-mechanism associations and near duplicates remain `OWNER_REVIEW_REQUIRED`; they are never labelled
-reviewed before a separate candidate-bound owner disposition exists. Prompt length and option
-length/style are compared by answer class. Integrity failures fail generation.
+duplicates, template/action/source-mechanism/target-mechanism answer classes, and per-family
+token/outcome associations. Every association records occurrence support, semantic-group support,
+answer-class counts, and enumerated item/group membership. Support-one observations remain recorded
+but do not require individual owner acceptance. Versioned categories distinguish necessary causal
+vocabulary, task/meta vocabulary, nuisance identifiers, answer-correlated wording, and duplicate or
+near-duplicate wording. Each category binds its sorted finding IDs with a reconstructible membership
+hash; category-level disposition is permitted only for that exact membership. Consequential
+findings remain item-addressable. Prompt length and option length/style are compared by correct
+answer class. Integrity failures fail generation.
 
 The split audit requires exact L1/L2 state, observation, action, group, and witness identities to be
 disjoint. Seed-, noise-, entity-ID-, and filesystem-independent signatures cover world topology,
 qualitative geometry, actions, counterfactual intervention, mechanism mapping, templates,
-observation structure, and combined witness configuration. Novel templates are withheld from L1;
+observation structure, target causal scenario, order-independent structural stratum, and combined
+witness configuration. Novel templates are withheld from L1;
 novel configurations have a qualitative signature absent from L1; physical analogies change the
-declared mechanism mapping relative to their same-schema L1 reference. Repeated signatures require
-one explicit matched stratum. Future treatment overlap remains `not_assessed_m2_2`.
+declared mechanism mapping relative to their same-schema L1 reference. Every L2 mechanism-transfer
+target is rejected if its target signature occurs anywhere in the complete L1 or prospective
+adaptation-source prohibited sets. Repeated causal scenarios require one explicit matched stratum.
+The audit reports question groups, unique causal scenarios, independent structural strata,
+cross-family matched variants, and same-family cosmetic variants separately. Only genuine causal
+scenarios and declared cross-family variants satisfy the scientific coverage floors; cosmetic
+repeats do not. Future treatment overlap remains `not_assessed_m2_2`.
 
 ## Hash chain
 
@@ -125,10 +144,13 @@ bind those operational facts separately.
 
 The review manifest independently binds the composite root, snapshot, source-generation,
 candidate-materialisation and review operations, validation and witness roots, logical review
-content, four inspection renders per group, and the exact hash/size of every retained review file
+content, four full-frame scientific renders plus four review zooms per group, and the exact hash/size
+of every retained review file
 other than the necessarily self-referential manifest itself. Review validation decodes every PNG as
-128x128 RGB and requires its pixels and raw-pixel identity to reconstruct independently. PNG exact
-container hashes remain separate from the portable scientific render identity.
+128x128 RGB and requires its pixels and raw-pixel identity to reconstruct independently. Full-frame
+scientific identities remain unchanged. Each zoom adds deterministic connection geometry, crops and
+nearest-neighbour magnifies the inspectable scene, and binds its raw identity to the source full
+frame. PNG exact container hashes remain separate from raw-pixel logical identities.
 
 ## Status semantics
 
@@ -186,7 +208,7 @@ template rendering is not LLM-generated language.
 ## Engineering fixture
 
 `tests/fixtures/literal_benchmark/authoring.json` is deliberately non-scientific and non-promotable.
-Its visible text uses synthetic panels, codes, tokens, and status labels, while internal temporary
+Its visible text uses synthetic setup and result terms, while internal temporary
 states exercise both Core schemas, L1/L2 partitions, actual/counterfactual replay, reverse options,
 audits, the M2.1 builder/validator, composite validation, review rendering, and manifest read-back.
 CI runs entirely on CPU with network, model, GPU, and secrets disabled. Its pinned identities are
@@ -195,7 +217,8 @@ software regressions only and cannot support a scientific claim.
 ## Owner review
 
 The ignored review bundle contains aggregate summary, per-group private review records, audits,
-candidate validation, witnesses, four-frame renders, a cue-disposition template, and a checklist.
+candidate validation, witnesses, four full-frame and four zoom renders per group, a category-bound
+cue-disposition template, and a checklist.
 Owner approval must identify the exact pull request and head SHA; exact authoring snapshot/file;
 source-generation, candidate-materialisation, and review-operation hashes; exact M2.1 candidate
 manifest and candidate root; M2.2 composite, source snapshot, witness and validation roots; and both

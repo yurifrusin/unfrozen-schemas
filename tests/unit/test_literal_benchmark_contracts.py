@@ -25,13 +25,17 @@ from unfrozen_schemas.evaluation.literal_models import (
     ContainmentScenarioCase,
     LiteralAuditStatus,
     LiteralAuthoringManifest,
+    LiteralLexicalCategory,
     LiteralOutcomeCode,
     LiteralPartition,
     LiteralPartitionPlan,
     LiteralScenarioSpec,
     LiteralSchema,
+    LiteralTaskFamily,
     LiteralTemplate,
     LiteralTransferLevel,
+    LiteralWitnessRecord,
+    StructuralNoveltyDimension,
     SupportScenarioCase,
 )
 from unfrozen_schemas.evaluation.literal_scenarios import (
@@ -41,6 +45,7 @@ from unfrozen_schemas.evaluation.literal_scenarios import (
 from unfrozen_schemas.evaluation.literal_validation import (
     LoadedLiteralSource,
     build_lexical_audit,
+    build_split_audit,
     validate_loaded_literal_source,
     verify_witness,
 )
@@ -61,6 +66,27 @@ def _template(
     )
 
 
+def _witnesses(
+    authoring: LiteralAuthoringManifest,
+) -> dict[str, LiteralWitnessRecord]:
+    templates = {item.template_id: item for item in authoring.templates}
+    ordered = tuple(sorted(authoring.scenarios, key=lambda item: item.semantic_group_id))
+    witnesses = {
+        spec.semantic_group_id: build_witness(spec, templates[spec.prompt_template_id])
+        for spec in ordered
+        if spec.task_family is not LiteralTaskFamily.PHYSICAL_ANALOGY
+    }
+    for spec in ordered:
+        if spec.task_family is LiteralTaskFamily.PHYSICAL_ANALOGY:
+            assert spec.analogy_reference_group_id is not None
+            witnesses[spec.semantic_group_id] = build_witness(
+                spec,
+                templates[spec.prompt_template_id],
+                analogy_source=witnesses[spec.analogy_reference_group_id],
+            )
+    return witnesses
+
+
 def test_generated_items_are_m2_1_snapshot_normalised(
     literal_authoring: LiteralAuthoringManifest,
 ) -> None:
@@ -70,11 +96,8 @@ def test_generated_items_are_m2_1_snapshot_normalised(
     authoring = literal_authoring.model_copy(
         update={"scenarios": (first, *literal_authoring.scenarios[1:])}
     )
-    templates = {item.template_id: item for item in authoring.templates}
-    witnesses = tuple(
-        build_witness(spec, templates[spec.prompt_template_id])
-        for spec in sorted(authoring.scenarios, key=lambda item: item.semantic_group_id)
-    )
+    witness_map = _witnesses(authoring)
+    witnesses = tuple(witness_map[key] for key in sorted(witness_map))
 
     items, _bindings = _source_items(authoring, witnesses)
 
@@ -123,6 +146,134 @@ def test_renderer_accepts_only_reconstructed_narrative_facts(
         render_literal_prompt(template, scenario)  # type: ignore[arg-type]
 
 
+def test_all_six_task_family_renderers_have_exact_natural_wording(
+    literal_authoring: LiteralAuthoringManifest,
+) -> None:
+    scenarios = {item.semantic_group_id: item for item in literal_authoring.scenarios}
+    source_witnesses = _witnesses(literal_authoring)
+    cases = (
+        (
+            LiteralTaskFamily.DIRECT_OUTCOME,
+            "fixture-route-l1-pass",
+            LiteralTransferLevel.L1,
+            LiteralPartition.L1_HELD_OUT,
+            (),
+        ),
+        (
+            LiteralTaskFamily.INTERVENTION_CONSEQUENCE,
+            "fixture-route-l1-pass",
+            LiteralTransferLevel.L1,
+            LiteralPartition.L1_HELD_OUT,
+            (),
+        ),
+        (
+            LiteralTaskFamily.MATCHED_COUNTERFACTUAL,
+            "fixture-pad-l1-shift",
+            LiteralTransferLevel.L1,
+            LiteralPartition.L1_HELD_OUT,
+            (),
+        ),
+        (
+            LiteralTaskFamily.NOVEL_TEMPLATE,
+            "fixture-route-l2-pass",
+            LiteralTransferLevel.L2,
+            LiteralPartition.L2_NOVEL_TEMPLATE,
+            (StructuralNoveltyDimension.PROMPT_TEMPLATE,),
+        ),
+        (
+            LiteralTaskFamily.NOVEL_CONFIGURATION,
+            "fixture-route-l2-pass",
+            LiteralTransferLevel.L2,
+            LiteralPartition.L2_NOVEL_CONFIGURATION,
+            (StructuralNoveltyDimension.QUALITATIVE_GEOMETRY,),
+        ),
+    )
+    observed: dict[LiteralTaskFamily, str] = {}
+    for family, base_id, level, partition, novelty in cases:
+        template_id = f"renderer-{family.name.casefold().replace('_', '-')}"
+        scenario = scenarios[base_id].model_copy(
+            update={
+                "semantic_group_id": template_id,
+                "task_family": family,
+                "transfer_level": level,
+                "partition": partition,
+                "prompt_template_id": template_id,
+                "structural_novelty_dimensions": novelty,
+                "analogy_reference_group_id": None,
+            }
+        )
+        template = LiteralTemplate(
+            template_id=template_id,
+            task_family=family,
+            transfer_level=level,
+            vocabulary_mode="literal_physics",
+        )
+        witness = build_witness(scenario, template)
+        observed[family] = render_literal_prompt(template, witness.narrative_facts)
+
+    analogy = scenarios["fixture-link-l2-shift"].model_copy(
+        update={
+            "semantic_group_id": "renderer-physical-analogy",
+            "prompt_template_id": "renderer-physical-analogy",
+        }
+    )
+    analogy_template = LiteralTemplate(
+        template_id=analogy.prompt_template_id,
+        task_family=analogy.task_family,
+        transfer_level=analogy.transfer_level,
+        vocabulary_mode="literal_physics",
+    )
+    assert analogy.analogy_reference_group_id is not None
+    analogy_witness = build_witness(
+        analogy,
+        analogy_template,
+        analogy_source=source_witnesses[analogy.analogy_reference_group_id],
+    )
+    observed[LiteralTaskFamily.PHYSICAL_ANALOGY] = render_literal_prompt(
+        analogy_template, analogy_witness.narrative_facts
+    )
+
+    assert observed == {
+        LiteralTaskFamily.DIRECT_OUTCOME: (
+            "Consider the following physical setup. The object begins inside the container and "
+            "the perimeter has an enabled opening aligned with and wide enough for the object on "
+            "its right side. Then the object moves outward through the right side. Which direct "
+            "outcome follows?"
+        ),
+        LiteralTaskFamily.INTERVENTION_CONSEQUENCE: (
+            "Consider the following physical setup. The object begins inside the container and "
+            "the perimeter has an enabled opening aligned with and wide enough for the object on "
+            "its right side. Now the object moves outward through the right side. Which "
+            "consequence "
+            "is caused by the intervention?"
+        ),
+        LiteralTaskFamily.MATCHED_COUNTERFACTUAL: (
+            "Consider two otherwise matched physical setups. In the actual setup, a platform is "
+            "in lower contact with the object and there is no tether; the lower platform is "
+            "removed. In the alternative setup, a platform is in lower contact with the object "
+            "and there is no tether; the setup is observed without removing or changing anything. "
+            "Which outcome occurs in the actual setup rather than the matched alternative?"
+        ),
+        LiteralTaskFamily.NOVEL_TEMPLATE: (
+            "A physical setup is described as follows: the object begins outside the container and "
+            "the relevant perimeter is fully open on its left side. Next, the object moves inward "
+            "through the left side. What is the object's outcome?"
+        ),
+        LiteralTaskFamily.NOVEL_CONFIGURATION: (
+            "Consider the following physical setup. The object begins outside the container and "
+            "the relevant perimeter is fully open on its left side. After the object moves inward "
+            "through the left side, what happens to the object?"
+        ),
+        LiteralTaskFamily.PHYSICAL_ANALOGY: (
+            "In a reference setup, a platform is in lower contact with the object and there is no "
+            "tether; when the lower platform is removed, the object moves downward. Apply the same "
+            "causal pattern to another setup: a platform touches the object's side without lower "
+            "contact and a taut load-bearing tether connects the object to an upper anchor; then "
+            "the tether is cut. What happens to the object?"
+        ),
+    }
+
+
 def test_partition_plan_disjointness_and_hashing(
     literal_pipeline_source: LoadedLiteralSource,
 ) -> None:
@@ -138,10 +289,16 @@ def test_partition_plan_disjointness_and_hashing(
 def test_every_fixture_witness_replays_and_changes_outcome(
     literal_authoring: LiteralAuthoringManifest,
 ) -> None:
+    witness_map = _witnesses(literal_authoring)
     for scenario in literal_authoring.scenarios:
         template = _template(literal_authoring, scenario)
-        witness = build_witness(scenario, template)
-        verify_witness(witness, scenario, template)
+        witness = witness_map[scenario.semantic_group_id]
+        source = (
+            witness_map[scenario.analogy_reference_group_id]
+            if scenario.analogy_reference_group_id is not None
+            else None
+        )
+        verify_witness(witness, scenario, template, analogy_source=source)
         assert witness.actual_outcome_code != witness.counterfactual_outcome_code
         assert witness.witness_sha256 == witness_hash(witness)
         assert witness.intervention_kind is scenario.intervention_kind
@@ -200,7 +357,10 @@ def test_every_intervention_family_rejects_extra_seed_difference_with_refreshed_
     else:
         scenario = existing
     template = _template(literal_authoring, scenario)
-    witness = build_witness(scenario, template)
+    source = None
+    if scenario.analogy_reference_group_id is not None:
+        source = _witnesses(literal_authoring)[scenario.analogy_reference_group_id]
+    witness = build_witness(scenario, template, analogy_source=source)
     changed_state = witness.initial_privileged_state.model_copy(
         update={"noise_seed": witness.initial_privileged_state.noise_seed + 1}
     )
@@ -216,26 +376,52 @@ def test_every_intervention_family_rejects_extra_seed_difference_with_refreshed_
     )
     corrupted = provisional.model_copy(update={"witness_sha256": witness_hash(provisional)})
     with pytest.raises(ValueError, match="prospective contract"):
-        verify_witness(corrupted, scenario, template)
+        verify_witness(corrupted, scenario, template, analogy_source=source)
 
 
-def test_snapshot_scene_drift_is_rejected_after_refreshing_snapshot_root(
-    literal_pipeline_source: LoadedLiteralSource,
+def test_seed_scene_and_option_nouns_do_not_create_a_new_causal_scenario(
+    literal_authoring: LiteralAuthoringManifest,
 ) -> None:
-    loaded = literal_pipeline_source
-    scenarios = list(loaded.authoring_snapshot.scenarios)
-    scenarios[0] = scenarios[0].model_copy(update={"scene_name": "Changed Fixture Scene"})
-    snapshot = loaded.authoring_snapshot.model_copy(update={"scenarios": tuple(scenarios)})
-    source_bundle = loaded.source_bundle.model_copy(
-        update={"authoring_snapshot_sha256": authoring_snapshot_hash(snapshot)}
+    scenario = literal_authoring.scenarios[0]
+    template = _template(literal_authoring, scenario)
+    original = build_witness(scenario, template)
+    changed_scenario = scenario.model_copy(
+        update={
+            "seed": scenario.seed + 10_000,
+            "noise_seed": scenario.noise_seed + 10_000,
+            "scene_name": "Changed Private Scene",
+        }
     )
-    corrupted = replace(
-        loaded,
-        authoring_snapshot=snapshot,
-        source_bundle=source_bundle,
+    changed = build_witness(changed_scenario, template)
+    assert (
+        original.structural_signatures.causal_scenario_sha256
+        == changed.structural_signatures.causal_scenario_sha256
     )
-    with pytest.raises(ValueError, match="Typed narrative facts do not reconstruct"):
-        validate_loaded_literal_source(corrupted)
+    assert (
+        original.structural_signatures.structural_stratum_sha256
+        == changed.structural_signatures.structural_stratum_sha256
+    )
+    assert render_literal_prompt(template, original.narrative_facts) == render_literal_prompt(
+        template, changed.narrative_facts
+    )
+    changed_registry = tuple(
+        record.model_copy(update={"text": record.text.replace("result", "response")})
+        if record.text_id in scenario.outcome_text_record_ids
+        else record
+        for record in literal_authoring.outcome_text_registry
+    )
+    changed_authoring = literal_authoring.model_copy(
+        update={"outcome_text_registry": changed_registry}
+    )
+    _, original_bindings = _source_items(
+        literal_authoring, tuple(_witnesses(literal_authoring).values())
+    )
+    _, changed_bindings = _source_items(
+        changed_authoring, tuple(_witnesses(changed_authoring).values())
+    )
+    assert {
+        binding.structural_signatures.causal_scenario_sha256 for binding in original_bindings
+    } == {binding.structural_signatures.causal_scenario_sha256 for binding in changed_bindings}
 
 
 def test_option_semantics_drift_is_rejected_after_refreshing_snapshot_root(
@@ -299,6 +485,152 @@ def test_split_has_exact_l1_l2_separation_and_structural_novelty(
             assert item.structural_signatures.configuration_sha256 not in l1_configurations
 
 
+def test_mechanism_transfer_compares_every_l1_and_prospective_source(
+    literal_pipeline_source: LoadedLiteralSource,
+) -> None:
+    loaded = literal_pipeline_source
+    bindings = loaded.item_bindings.bindings
+    l1_signatures = {
+        binding.structural_signatures.target_mechanism_sha256
+        for binding in bindings
+        if binding.transfer_level is LiteralTransferLevel.L1
+    }
+    assert l1_signatures == set(loaded.partition_plan.prohibited_l1_source_mechanism_signatures)
+    incomplete = loaded.partition_plan.model_copy(
+        update={
+            "prohibited_l1_source_mechanism_signatures": tuple(sorted(l1_signatures))[1:],
+            "prohibited_mechanism_transfer_target_signatures": tuple(
+                sorted(
+                    set(tuple(sorted(l1_signatures))[1:])
+                    | set(loaded.partition_plan.prospective_adaptation_source_mechanism_signatures)
+                )
+            ),
+        }
+    )
+    with pytest.raises(ValueError, match="complete L1 mechanism-source set"):
+        build_split_audit(
+            candidate_version=loaded.source_manifest.benchmark_version,
+            items=loaded.items,
+            bindings=bindings,
+            witnesses=loaded.witness_bundle.witnesses,
+            partition_plan=incomplete,
+        )
+
+    transfer = next(
+        binding for binding in bindings if binding.task_family is LiteralTaskFamily.PHYSICAL_ANALOGY
+    )
+    prospective = tuple(
+        sorted(
+            {
+                *loaded.partition_plan.prospective_adaptation_source_mechanism_signatures,
+                transfer.structural_signatures.target_mechanism_sha256,
+            }
+        )
+    )
+    coordinated = loaded.partition_plan.model_copy(
+        update={
+            "prospective_adaptation_source_mechanism_signatures": prospective,
+            "prohibited_mechanism_transfer_target_signatures": tuple(
+                sorted(l1_signatures | set(prospective))
+            ),
+        }
+    )
+    with pytest.raises(ValueError, match="represented in prohibited source material"):
+        build_split_audit(
+            candidate_version=loaded.source_manifest.benchmark_version,
+            items=loaded.items,
+            bindings=bindings,
+            witnesses=loaded.witness_bundle.witnesses,
+            partition_plan=coordinated,
+        )
+
+
+def test_split_reports_questions_scenarios_strata_and_noncosmetic_variants(
+    literal_pipeline_source: LoadedLiteralSource,
+) -> None:
+    audit = literal_pipeline_source.split_audit
+    assert audit.question_group_count == 8
+    assert audit.causal_scenario_count == 8
+    assert audit.independent_structural_stratum_count == 8
+    assert audit.matched_variant_count == 0
+    assert audit.cosmetic_variant_count == 0
+    assert len(audit.causal_scenario_groups) == audit.causal_scenario_count
+    assert len(audit.structural_signature_strata) == (audit.independent_structural_stratum_count)
+
+
+def test_exact_prompt_duplicates_require_declared_cosmetic_variant_identity(
+    literal_pipeline_source: LoadedLiteralSource,
+) -> None:
+    loaded = literal_pipeline_source
+    left = loaded.item_bindings.bindings[0]
+    right = next(
+        binding
+        for binding in loaded.item_bindings.bindings[1:]
+        if binding.task_family is left.task_family
+    )
+    matched_stratum_id = "test-declared-cosmetic-variant"
+    updated_bindings = tuple(
+        binding.model_copy(
+            update={
+                "matched_stratum_id": matched_stratum_id,
+                "structural_signatures": binding.structural_signatures.model_copy(
+                    update={
+                        "causal_scenario_sha256": (
+                            left.structural_signatures.causal_scenario_sha256
+                        )
+                    }
+                ),
+            }
+        )
+        if binding.semantic_group_id in {left.semantic_group_id, right.semantic_group_id}
+        else binding
+        for binding in loaded.item_bindings.bindings
+    )
+    source_prompt = next(
+        item.model_visible.prompt for item in loaded.items if item.item_id == left.item_ids[0]
+    )
+    updated_items = tuple(
+        item.model_copy(
+            update={
+                "model_visible": item.model_visible.model_copy(update={"prompt": source_prompt})
+            }
+        )
+        if item.item_id in right.item_ids
+        else item
+        for item in loaded.items
+    )
+
+    lexical = build_lexical_audit(
+        candidate_version=loaded.source_manifest.benchmark_version,
+        items=updated_items,
+        bindings=updated_bindings,
+    )
+    exact = [
+        finding for finding in lexical.findings if finding.finding_kind == "exact-prompt-duplicate"
+    ]
+    assert len(exact) == 1
+    assert exact[0].disposition is LiteralAuditStatus.OWNER_REVIEW_REQUIRED
+    assert exact[0].occurrence_support == 2
+    split = build_split_audit(
+        candidate_version=loaded.source_manifest.benchmark_version,
+        items=updated_items,
+        bindings=updated_bindings,
+        witnesses=loaded.witness_bundle.witnesses,
+        partition_plan=loaded.partition_plan,
+    )
+    assert split.exact_prompt_duplicate_count == 1
+    assert split.cosmetic_variant_count == 1
+
+    with pytest.raises(ValueError, match="declared variants of one causal scenario"):
+        build_split_audit(
+            candidate_version=loaded.source_manifest.benchmark_version,
+            items=updated_items,
+            bindings=loaded.item_bindings.bindings,
+            witnesses=loaded.witness_bundle.witnesses,
+            partition_plan=loaded.partition_plan,
+        )
+
+
 def test_lexical_findings_remain_owner_review_required(
     literal_pipeline_source: LoadedLiteralSource,
 ) -> None:
@@ -313,7 +645,23 @@ def test_lexical_findings_remain_owner_review_required(
     assert audit.causal_term_allowlist
     assert audit.prompt_length_by_answer_class
     assert audit.option_length_by_answer_class
+    assert audit.distractor_option_length_by_answer_class
     assert audit.option_style_by_answer_class
+    assert audit.tokenizer_specific_length_check_status == "pending_m2_4"
+    assert all(
+        finding.occurrence_support >= finding.semantic_group_support for finding in audit.findings
+    )
+    assert all(finding.answer_class_counts for finding in audit.findings)
+    assert all(finding.semantic_group_ids and finding.item_ids for finding in audit.findings)
+    assert all(
+        finding.disposition is not LiteralAuditStatus.OWNER_REVIEW_REQUIRED
+        for finding in audit.findings
+        if finding.semantic_group_support == 1
+    )
+    assert {summary.category for summary in audit.category_summaries} == set(LiteralLexicalCategory)
+    assert all(
+        summary.finding_count == len(summary.finding_ids) for summary in audit.category_summaries
+    )
 
     first, second = loaded.items[:2]
     corrupted_items = (
@@ -339,3 +687,25 @@ def test_lexical_findings_remain_owner_review_required(
             items=corrupted_items,
             bindings=loaded.item_bindings.bindings,
         )
+
+
+def test_option_forms_are_parallel_and_length_is_not_answer_deterministic(
+    literal_pipeline_source: LoadedLiteralSource,
+) -> None:
+    items = {item.item_id: item for item in literal_pipeline_source.items}
+    lengths_by_answer: dict[str, set[int]] = {}
+    modal = {"may", "might", "must", "will", "would", "could", "should"}
+    for binding in literal_pipeline_source.item_bindings.bindings:
+        item = items[binding.item_ids[0]]
+        options = item.model_visible.ordered_options
+        lengths = {option.option_id: len(option.text.split()) for option in options}
+        assert max(lengths.values()) - min(lengths.values()) <= 1
+        assert all(option.text.startswith("The object ") for option in options)
+        assert all(option.text.endswith(".") for option in options)
+        assert all(not (set(option.text.casefold().split()) & modal) for option in options)
+        assert len({option.text.count(".") for option in options}) == 1
+        lengths_by_answer.setdefault(binding.stable_correct_option_id, set()).add(
+            lengths[binding.stable_correct_option_id]
+        )
+    assert lengths_by_answer["movement-succeeds"] & lengths_by_answer["movement-blocked"]
+    assert lengths_by_answer["object-falls"] & lengths_by_answer["object-stays"]

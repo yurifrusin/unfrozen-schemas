@@ -21,12 +21,13 @@ SHA256_PATTERN = r"^[a-f0-9]{64}$"
 SLUG_PATTERN = r"^[a-z0-9][a-z0-9._-]*$"
 DISPLAY_NAME_PATTERN = r"^[A-Za-z][A-Za-z '-]{0,39}$"
 LITERAL_CANDIDATE_VERSION = "m2-2-literal-candidate-v1"
-LITERAL_GENERATOR_VERSION = "literal-generator-v1"
-LITERAL_PARTITION_PLAN_VERSION = "literal-partition-plan-v1"
-LITERAL_OUTCOME_TEXT_REGISTRY_VERSION = "literal-outcome-text-registry-v1"
-LITERAL_STRUCTURAL_SIGNATURE_VERSION = "literal-structural-signatures-v1"
+LITERAL_GENERATOR_VERSION = "literal-generator-v2"
+LITERAL_PARTITION_PLAN_VERSION = "literal-partition-plan-v2"
+LITERAL_OUTCOME_TEXT_REGISTRY_VERSION = "literal-outcome-text-registry-v2"
+LITERAL_STRUCTURAL_SIGNATURE_VERSION = "literal-structural-signatures-v2"
 LITERAL_INTERVENTION_CONTRACT_VERSION = "literal-intervention-contract-v1"
-LITERAL_CAUSAL_ALLOWLIST_VERSION = "literal-causal-term-allowlist-v1"
+LITERAL_CAUSAL_ALLOWLIST_VERSION = "literal-causal-term-allowlist-v2"
+LITERAL_LEXICAL_CATEGORY_VERSION = "literal-lexical-category-v1"
 
 
 class LiteralSchema(StrEnum):
@@ -140,12 +141,20 @@ class LiteralAuditStatus(StrEnum):
     FAIL = "FAIL"
 
 
+class LiteralLexicalCategory(StrEnum):
+    NECESSARY_CAUSAL_VOCABULARY = "necessary-causal-vocabulary"
+    TASK_META_VOCABULARY = "task-meta-vocabulary"
+    NUISANCE_IDENTIFIER_VOCABULARY = "nuisance-identifier-vocabulary"
+    ANSWER_CORRELATED_WORDING = "answer-correlated-wording"
+    DUPLICATE_WORDING = "duplicate-near-duplicate-wording"
+
+
 class LiteralTemplate(FrozenModel):
     template_id: str = Field(pattern=SLUG_PATTERN)
     task_family: LiteralTaskFamily
     transfer_level: LiteralTransferLevel
-    renderer_version: Literal["literal-typed-narrative-renderer-v1"] = (
-        "literal-typed-narrative-renderer-v1"
+    renderer_version: Literal["literal-typed-narrative-renderer-v2"] = (
+        "literal-typed-narrative-renderer-v2"
     )
     instruction_kind: Literal["choose-one-literal-outcome"] = "choose-one-literal-outcome"
     vocabulary_mode: Literal["literal_physics", "engineering_fixture"] = "literal_physics"
@@ -238,15 +247,15 @@ class LiteralScenarioSpec(FrozenModel):
 
 
 class LiteralAuthoringManifest(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     authoring_kind: Literal["private_literal_authoring"] = "private_literal_authoring"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     purpose: Literal["outcome", "engineering"]
     environment_version: Literal["schemaworld-core-v1"] = "schemaworld-core-v1"
-    generator_version: Literal["literal-generator-v1"] = "literal-generator-v1"
-    partition_plan_version: Literal["literal-partition-plan-v1"] = "literal-partition-plan-v1"
-    outcome_text_registry_version: Literal["literal-outcome-text-registry-v1"] = (
-        "literal-outcome-text-registry-v1"
+    generator_version: Literal["literal-generator-v2"] = "literal-generator-v2"
+    partition_plan_version: Literal["literal-partition-plan-v2"] = "literal-partition-plan-v2"
+    outcome_text_registry_version: Literal["literal-outcome-text-registry-v2"] = (
+        "literal-outcome-text-registry-v2"
     )
     engineering_only: bool
     scientific_eligible: bool
@@ -255,6 +264,7 @@ class LiteralAuthoringManifest(FrozenModel):
     outcome_text_registry: tuple[LiteralOutcomeText, ...] = Field(min_length=4)
     scenarios: tuple[LiteralScenarioSpec, ...] = Field(min_length=1)
     prospective_adaptation_strata: tuple[str, ...] = Field(min_length=1)
+    prospective_adaptation_source_mechanism_signatures: tuple[str, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_authoring_identity(self) -> LiteralAuthoringManifest:
@@ -272,6 +282,13 @@ class LiteralAuthoringManifest(FrozenModel):
             raise ValueError("Literal semantic-group IDs must be unique")
         if len(text_ids) != len(set(text_ids)):
             raise ValueError("Literal outcome-text IDs must be unique")
+        prospective_signatures = self.prospective_adaptation_source_mechanism_signatures
+        if tuple(sorted(prospective_signatures)) != prospective_signatures or len(
+            prospective_signatures
+        ) != len(set(prospective_signatures)):
+            raise ValueError(
+                "Prospective adaptation-source mechanism signatures must be sorted and unique"
+            )
         normalised_texts: set[str] = set()
         for record in self.outcome_text_registry:
             text = " ".join(record.text.split()).casefold()
@@ -340,18 +357,21 @@ class LiteralAuthoringManifest(FrozenModel):
 
 
 class LiteralStructuralSignatures(FrozenModel):
-    schema_version: Literal["1"] = "1"
-    signature_version: Literal["literal-structural-signatures-v1"] = (
-        "literal-structural-signatures-v1"
+    schema_version: Literal["2"] = "2"
+    signature_version: Literal["literal-structural-signatures-v2"] = (
+        "literal-structural-signatures-v2"
     )
     world_topology_sha256: str = Field(pattern=SHA256_PATTERN)
     qualitative_geometry_sha256: str = Field(pattern=SHA256_PATTERN)
     action_plan_sha256: str = Field(pattern=SHA256_PATTERN)
     counterfactual_intervention_sha256: str = Field(pattern=SHA256_PATTERN)
     source_mechanism_sha256: str = Field(pattern=SHA256_PATTERN)
+    target_mechanism_sha256: str = Field(pattern=SHA256_PATTERN)
     prompt_template_sha256: str = Field(pattern=SHA256_PATTERN)
     observation_structure_sha256: str = Field(pattern=SHA256_PATTERN)
     configuration_sha256: str = Field(pattern=SHA256_PATTERN)
+    causal_scenario_sha256: str = Field(pattern=SHA256_PATTERN)
+    structural_stratum_sha256: str = Field(pattern=SHA256_PATTERN)
     witness_configuration_sha256: str = Field(pattern=SHA256_PATTERN)
 
 
@@ -373,9 +393,8 @@ class LiteralInterventionContract(FrozenModel):
 
 
 class LiteralNarrativeFacts(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     facts_kind: Literal["literal_narrative_facts"] = "literal_narrative_facts"
-    scene_name: str = Field(pattern=DISPLAY_NAME_PATTERN)
     schema_identity: LiteralSchema
     transfer_level: LiteralTransferLevel
     task_family: LiteralTaskFamily
@@ -384,19 +403,20 @@ class LiteralNarrativeFacts(FrozenModel):
     direction: LiteralDirection | None
     intervention_kind: LiteralInterventionKind
     source_mechanism: LiteralMechanismKind
+    target_mechanism: LiteralMechanismKind
     actual_scene_clause: str = Field(min_length=1)
     counterfactual_scene_clause: str = Field(min_length=1)
     actual_action_summary: str = Field(min_length=1)
     counterfactual_action_summary: str = Field(min_length=1)
-    mechanism_summary: str = Field(min_length=1)
+    source_mapping_clause: str | None = None
     task_family_question: str = Field(min_length=1)
     instructions: str = Field(min_length=1)
 
 
 class LiteralPartitionPlan(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     plan_kind: Literal["literal_partition_plan"] = "literal_partition_plan"
-    plan_version: Literal["literal-partition-plan-v1"] = "literal-partition-plan-v1"
+    plan_version: Literal["literal-partition-plan-v2"] = "literal-partition-plan-v2"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     prospective_adaptation_strata: tuple[str, ...]
     l1_held_out_group_ids: tuple[str, ...]
@@ -410,8 +430,14 @@ class LiteralPartitionPlan(FrozenModel):
     reserved_action_signatures: tuple[str, ...]
     reserved_counterfactual_signatures: tuple[str, ...]
     reserved_source_mechanism_signatures: tuple[str, ...]
+    reserved_target_mechanism_signatures: tuple[str, ...]
+    prohibited_l1_source_mechanism_signatures: tuple[str, ...]
+    prospective_adaptation_source_mechanism_signatures: tuple[str, ...]
+    prohibited_mechanism_transfer_target_signatures: tuple[str, ...]
     reserved_observation_structure_signatures: tuple[str, ...]
     reserved_configuration_signatures: tuple[str, ...]
+    reserved_causal_scenario_signatures: tuple[str, ...]
+    reserved_structural_stratum_signatures: tuple[str, ...]
     reserved_witness_configuration_signatures: tuple[str, ...]
     future_treatment_overlap_status: Literal["not_assessed_m2_2"] = "not_assessed_m2_2"
     partition_plan_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -436,6 +462,13 @@ class LiteralPartitionPlan(FrozenModel):
             raise ValueError("Prospective adaptation and benchmark group IDs must be disjoint")
         if adaptation & set(self.benchmark_reserved_prompt_template_ids):
             raise ValueError("Prospective adaptation and prompt-template IDs must be disjoint")
+        prohibited = set(self.prohibited_l1_source_mechanism_signatures) | set(
+            self.prospective_adaptation_source_mechanism_signatures
+        )
+        if prohibited != set(self.prohibited_mechanism_transfer_target_signatures):
+            raise ValueError(
+                "Prohibited transfer targets must equal complete L1 and adaptation-source sets"
+            )
         for field_name in (
             "prospective_adaptation_strata",
             "l1_held_out_group_ids",
@@ -449,8 +482,14 @@ class LiteralPartitionPlan(FrozenModel):
             "reserved_action_signatures",
             "reserved_counterfactual_signatures",
             "reserved_source_mechanism_signatures",
+            "reserved_target_mechanism_signatures",
+            "prohibited_l1_source_mechanism_signatures",
+            "prospective_adaptation_source_mechanism_signatures",
+            "prohibited_mechanism_transfer_target_signatures",
             "reserved_observation_structure_signatures",
             "reserved_configuration_signatures",
+            "reserved_causal_scenario_signatures",
+            "reserved_structural_stratum_signatures",
             "reserved_witness_configuration_signatures",
         ):
             values = getattr(self, field_name)
@@ -472,13 +511,14 @@ class LiteralTemplateRegistryManifest(FrozenModel):
 
 
 class LiteralWitnessRecord(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     semantic_group_id: str = Field(pattern=SLUG_PATTERN)
     item_ids: tuple[str, str]
     schema_identity: LiteralSchema
     transfer_level: LiteralTransferLevel
     task_family: LiteralTaskFamily
     source_mechanism: LiteralMechanismKind
+    target_mechanism: LiteralMechanismKind
     prompt_template_id: str = Field(pattern=SLUG_PATTERN)
     partition: LiteralPartition
     scenario_case: LiteralScenarioCase
@@ -487,7 +527,7 @@ class LiteralWitnessRecord(FrozenModel):
     matched_stratum_id: str | None
     analogy_reference_group_id: str | None
     environment_version: Literal["schemaworld-core-v1"] = "schemaworld-core-v1"
-    generator_version: Literal["literal-generator-v1"] = "literal-generator-v1"
+    generator_version: Literal["literal-generator-v2"] = "literal-generator-v2"
     seed: int
     noise_seed: int
     initial_privileged_state: WorldState
@@ -530,7 +570,7 @@ class LiteralWitnessRecord(FrozenModel):
 
 
 class LiteralWitnessBundle(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     bundle_kind: Literal["literal_witness_bundle"] = "literal_witness_bundle"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     witnesses: tuple[LiteralWitnessRecord, ...]
@@ -538,7 +578,7 @@ class LiteralWitnessBundle(FrozenModel):
 
 
 class LiteralItemBinding(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     semantic_group_id: str = Field(pattern=SLUG_PATTERN)
     item_ids: tuple[str, str]
     variant_ids: tuple[str, str]
@@ -548,6 +588,7 @@ class LiteralItemBinding(FrozenModel):
     transfer_level: LiteralTransferLevel
     task_family: LiteralTaskFamily
     source_mechanism: LiteralMechanismKind
+    target_mechanism: LiteralMechanismKind
     prompt_template_id: str = Field(pattern=SLUG_PATTERN)
     partition: LiteralPartition
     scenario_case: LiteralScenarioCase
@@ -567,7 +608,7 @@ class LiteralItemBinding(FrozenModel):
 
 
 class LiteralItemBindingBundle(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     bundle_kind: Literal["literal_item_binding_bundle"] = "literal_item_binding_bundle"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     bindings: tuple[LiteralItemBinding, ...]
@@ -575,18 +616,48 @@ class LiteralItemBindingBundle(FrozenModel):
 
 
 class LiteralLexicalFinding(FrozenModel):
+    schema_version: Literal["2"] = "2"
+    finding_id: str = Field(pattern=r"^cue-[a-f0-9]{24}$")
+    category: LiteralLexicalCategory
     finding_kind: str = Field(pattern=SLUG_PATTERN)
     scope: str = Field(min_length=1)
     value: str = Field(min_length=1)
+    occurrence_support: int = Field(ge=1)
+    semantic_group_support: int = Field(ge=1)
+    answer_class_counts: dict[str, int]
+    semantic_group_ids: tuple[str, ...]
+    item_ids: tuple[str, ...]
+    membership_sha256: str = Field(pattern=SHA256_PATTERN)
     disposition: LiteralAuditStatus
+
+    @model_validator(mode="after")
+    def validate_membership(self) -> LiteralLexicalFinding:
+        for field_name in ("semantic_group_ids", "item_ids"):
+            values = getattr(self, field_name)
+            if tuple(sorted(values)) != values or len(values) != len(set(values)):
+                raise ValueError(f"{field_name} must be sorted and unique")
+        if self.semantic_group_support != len(self.semantic_group_ids):
+            raise ValueError("Lexical finding support must match enumerated semantic groups")
+        if sum(self.answer_class_counts.values()) > self.occurrence_support:
+            raise ValueError("Lexical answer counts cannot exceed occurrence support")
+        return self
+
+
+class LiteralLexicalCategorySummary(FrozenModel):
+    category_version: Literal["literal-lexical-category-v1"] = "literal-lexical-category-v1"
+    category: LiteralLexicalCategory
+    finding_ids: tuple[str, ...]
+    finding_count: int = Field(ge=0)
+    owner_disposition_required: bool
+    category_membership_sha256: str = Field(pattern=SHA256_PATTERN)
 
 
 class LiteralLexicalAudit(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     audit_kind: Literal["literal_lexical_cue_audit"] = "literal_lexical_cue_audit"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
-    causal_term_allowlist_version: Literal["literal-causal-term-allowlist-v1"] = (
-        "literal-causal-term-allowlist-v1"
+    causal_term_allowlist_version: Literal["literal-causal-term-allowlist-v2"] = (
+        "literal-causal-term-allowlist-v2"
     )
     causal_term_allowlist: tuple[str, ...]
     semantic_group_count: int
@@ -595,12 +666,17 @@ class LiteralLexicalAudit(FrozenModel):
     template_answer_counts: dict[str, dict[str, int]]
     action_word_answer_counts: dict[str, dict[str, int]]
     source_mechanism_answer_counts: dict[str, dict[str, int]]
+    target_mechanism_answer_counts: dict[str, dict[str, int]]
     prompt_length_by_answer_class: dict[str, dict[str, int]]
     option_length_by_answer_class: dict[str, dict[str, int]]
+    distractor_option_length_by_answer_class: dict[str, dict[str, int]]
     option_style_by_answer_class: dict[str, dict[str, int]]
+    option_pair_length_difference_counts: dict[str, int]
+    tokenizer_specific_length_check_status: Literal["pending_m2_4"] = "pending_m2_4"
     exact_duplicate_group_count: int
     near_duplicate_group_pairs: tuple[tuple[str, str], ...]
     findings: tuple[LiteralLexicalFinding, ...]
+    category_summaries: tuple[LiteralLexicalCategorySummary, ...]
     unresolved_owner_review_finding_count: int
     external_language_overlap_status: Literal["not_assessed_m2_2"] = "not_assessed_m2_2"
     status: LiteralAuditStatus
@@ -608,10 +684,15 @@ class LiteralLexicalAudit(FrozenModel):
 
 
 class LiteralSplitAudit(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     audit_kind: Literal["literal_split_audit"] = "literal_split_audit"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     semantic_group_count: int
+    question_group_count: int
+    causal_scenario_count: int
+    independent_structural_stratum_count: int
+    matched_variant_count: int
+    cosmetic_variant_count: int
     l1_group_count: int
     l2_group_count: int
     unique_state_hash_count: int
@@ -620,6 +701,7 @@ class LiteralSplitAudit(FrozenModel):
     unique_group_count: int
     unique_witness_hash_count: int
     l2_structural_novelty_dimensions: dict[str, tuple[StructuralNoveltyDimension, ...]]
+    causal_scenario_groups: dict[str, tuple[str, ...]]
     structural_signature_strata: dict[str, tuple[str, ...]]
     exact_prompt_duplicate_count: int
     future_treatment_overlap_status: Literal["not_assessed_m2_2"] = "not_assessed_m2_2"
@@ -628,16 +710,22 @@ class LiteralSplitAudit(FrozenModel):
 
 
 class LiteralValidationReport(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     report_kind: Literal["literal_validation_report"] = "literal_validation_report"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     purpose: Literal["outcome", "engineering"]
     semantic_group_count: int
+    question_group_count: int
+    causal_scenario_count: int
+    independent_structural_stratum_count: int
+    matched_variant_count: int
+    cosmetic_variant_count: int
     source_item_count: int
     schema_counts: dict[str, int]
     level_counts: dict[str, int]
     family_counts: dict[str, int]
-    mechanism_counts: dict[str, int]
+    source_mechanism_counts: dict[str, int]
+    target_mechanism_counts: dict[str, int]
     simulator_correctness: Literal["PASS"] = "PASS"
     typed_narrative_integrity: Literal["PASS"] = "PASS"
     counterfactual_parity: Literal["PASS"] = "PASS"
@@ -660,7 +748,7 @@ class LiteralValidationReport(FrozenModel):
 
 
 class LiteralSourceBundleManifest(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     manifest_kind: Literal["literal_source_bundle"] = "literal_source_bundle"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     purpose: Literal["outcome", "engineering"]
@@ -686,7 +774,7 @@ class LiteralSourceBundleManifest(FrozenModel):
 
 
 class LiteralCandidateManifest(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     manifest_kind: Literal["literal_private_candidate"] = "literal_private_candidate"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     purpose: Literal["outcome", "engineering"]
@@ -716,7 +804,7 @@ class LiteralCandidateManifest(FrozenModel):
 
 
 class LiteralReviewItem(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     semantic_group_id: str = Field(pattern=SLUG_PATTERN)
     item_ids: tuple[str, str]
     schema_identity: LiteralSchema
@@ -725,6 +813,7 @@ class LiteralReviewItem(FrozenModel):
     task_family: LiteralTaskFamily
     scenario_case: LiteralScenarioCase
     source_mechanism: LiteralMechanismKind
+    target_mechanism: LiteralMechanismKind
     structural_novelty_dimensions: tuple[StructuralNoveltyDimension, ...]
     structural_signatures: LiteralStructuralSignatures
     prompt: str
@@ -746,7 +835,8 @@ class LiteralReviewItem(FrozenModel):
     provenance: ProvenanceRights
     human_validation: HumanValidationMetadata
     governance_status: Literal["owner_review_pending", "engineering_only"]
-    render_paths: tuple[str, str, str, str]
+    full_frame_render_paths: tuple[str, str, str, str]
+    review_zoom_render_paths: tuple[str, str, str, str]
     authoring_snapshot_sha256: str = Field(pattern=SHA256_PATTERN)
     literal_candidate_root_sha256: str = Field(pattern=SHA256_PATTERN)
     witness_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -756,17 +846,29 @@ class LiteralReviewItem(FrozenModel):
 
 
 class LiteralCueDispositionRecord(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     record_kind: Literal["literal_cue_owner_disposition"] = "literal_cue_owner_disposition"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     lexical_audit_sha256: str = Field(pattern=SHA256_PATTERN)
     candidate_root_sha256: str = Field(pattern=SHA256_PATTERN)
     status: Literal["PENDING"] = "PENDING"
-    required_finding_indexes: tuple[int, ...]
-    accepted_finding_indexes: tuple[int, ...] = ()
-    rejected_finding_indexes: tuple[int, ...] = ()
-    near_duplicate_disposition_required: bool
+    required_category_membership_hashes: dict[LiteralLexicalCategory, str]
+    accepted_category_membership_hashes: tuple[str, ...] = ()
+    rejected_category_membership_hashes: tuple[str, ...] = ()
+    consequential_finding_ids: tuple[str, ...]
     owner_decision_recorded: Literal[False] = False
+
+    @model_validator(mode="after")
+    def validate_pending_disposition(self) -> LiteralCueDispositionRecord:
+        if tuple(sorted(self.consequential_finding_ids)) != self.consequential_finding_ids:
+            raise ValueError("Consequential cue finding IDs must be sorted")
+        if len(self.consequential_finding_ids) != len(set(self.consequential_finding_ids)):
+            raise ValueError("Consequential cue finding IDs must be unique")
+        if set(self.accepted_category_membership_hashes) & set(
+            self.rejected_category_membership_hashes
+        ):
+            raise ValueError("Cue categories cannot be both accepted and rejected")
+        return self
 
 
 class LiteralPendingOwnerReview(FrozenModel):
@@ -805,16 +907,36 @@ class LiteralPendingOwnerReview(FrozenModel):
 
 
 class LiteralRenderRecord(FrozenModel):
+    schema_version: Literal["2"] = "2"
     path: str = Field(min_length=1)
+    view_kind: Literal["scientific-full-frame", "review-zoom"]
     width: Literal[128] = 128
     height: Literal[128] = 128
     mode: Literal["RGB"] = "RGB"
     raw_pixel_sha256: str = Field(pattern=SHA256_PATTERN)
-    scientific_render_sha256: str = Field(pattern=SHA256_PATTERN)
+    logical_render_sha256: str = Field(pattern=SHA256_PATTERN)
+    scientific_render_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    source_full_frame_raw_pixel_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_view_identity(self) -> LiteralRenderRecord:
+        if self.view_kind == "scientific-full-frame":
+            if (
+                self.scientific_render_sha256 is None
+                or self.source_full_frame_raw_pixel_sha256 is not None
+                or self.logical_render_sha256 != self.scientific_render_sha256
+            ):
+                raise ValueError("Full-frame render identity is inconsistent")
+        elif (
+            self.scientific_render_sha256 is not None
+            or self.source_full_frame_raw_pixel_sha256 is None
+        ):
+            raise ValueError("Review-zoom render identity is inconsistent")
+        return self
 
 
 class LiteralReviewManifest(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     manifest_kind: Literal["literal_private_review_bundle"] = "literal_private_review_bundle"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     git: GitState
@@ -834,7 +956,7 @@ class LiteralReviewManifest(FrozenModel):
 
 
 class LiteralOperationRecord(FrozenModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     record_kind: Literal["literal_operation"] = "literal_operation"
     operation_id: str
     operation_kind: Literal[
@@ -852,7 +974,7 @@ class LiteralOperationRecord(FrozenModel):
     git: GitState
     codex_spec_sha256: str = Field(pattern=SHA256_PATTERN)
     environment_version: Literal["schemaworld-core-v1"] = "schemaworld-core-v1"
-    generator_version: Literal["literal-generator-v1"] = "literal-generator-v1"
+    generator_version: Literal["literal-generator-v2"] = "literal-generator-v2"
     resolved_configuration: dict[str, Any]
     input_hashes: dict[str, str]
     output_hashes: dict[str, str]

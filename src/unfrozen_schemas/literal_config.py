@@ -18,7 +18,10 @@ from unfrozen_schemas.evaluation.literal_models import (
 
 
 class LiteralCoverageConfig(FrozenModel):
-    minimum_semantic_groups: int = Field(ge=1)
+    minimum_question_groups: int = Field(ge=1)
+    minimum_causal_scenarios: int = Field(ge=1)
+    minimum_independent_structural_strata: int = Field(ge=1)
+    minimum_matched_variants: int = Field(ge=0)
     records_per_group: Literal[2] = 2
     required_schemas: tuple[LiteralSchema, ...]
     required_levels: tuple[LiteralTransferLevel, ...]
@@ -49,8 +52,8 @@ class LiteralConfig(FrozenModel):
     candidate_version: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
     purpose: Literal["outcome", "engineering"]
     environment_version: Literal["schemaworld-core-v1"] = "schemaworld-core-v1"
-    generator_version: Literal["literal-generator-v1"] = "literal-generator-v1"
-    partition_plan_version: Literal["literal-partition-plan-v1"] = "literal-partition-plan-v1"
+    generator_version: Literal["literal-generator-v2"] = "literal-generator-v2"
+    partition_plan_version: Literal["literal-partition-plan-v2"] = "literal-partition-plan-v2"
     authoring_manifest: str = Field(min_length=1)
     source_root: str = Field(min_length=1)
     candidate_root: str = Field(min_length=1)

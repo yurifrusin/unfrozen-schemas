@@ -73,6 +73,7 @@ from unfrozen_schemas.evaluation.literal_models import (
     LiteralScenarioSpec,
     LiteralSchema,
     LiteralSourceBundleManifest,
+    LiteralTaskFamily,
     LiteralTemplateRegistryManifest,
     LiteralTransferLevel,
     LiteralValidationReport,
@@ -264,6 +265,7 @@ def _source_items(
             transfer_level=spec.transfer_level,
             task_family=spec.task_family,
             source_mechanism=witness.source_mechanism,
+            target_mechanism=witness.target_mechanism,
             prompt_template_id=spec.prompt_template_id,
             partition=spec.partition,
             scenario_case=spec.scenario_case,
@@ -298,6 +300,19 @@ def _partition_plan(
         )
         for partition in LiteralPartition
     }
+    l1_source_signatures = tuple(
+        sorted(
+            {
+                item.structural_signatures.target_mechanism_sha256
+                for item in witnesses
+                if item.transfer_level is LiteralTransferLevel.L1
+            }
+        )
+    )
+    prospective_source_signatures = authoring.prospective_adaptation_source_mechanism_signatures
+    prohibited_target_signatures = tuple(
+        sorted(set(l1_source_signatures) | set(prospective_source_signatures))
+    )
     provisional = LiteralPartitionPlan(
         candidate_version=authoring.candidate_version,
         prospective_adaptation_strata=tuple(sorted(authoring.prospective_adaptation_strata)),
@@ -331,11 +346,23 @@ def _partition_plan(
         reserved_source_mechanism_signatures=tuple(
             sorted({item.structural_signatures.source_mechanism_sha256 for item in witnesses})
         ),
+        reserved_target_mechanism_signatures=tuple(
+            sorted({item.structural_signatures.target_mechanism_sha256 for item in witnesses})
+        ),
+        prohibited_l1_source_mechanism_signatures=l1_source_signatures,
+        prospective_adaptation_source_mechanism_signatures=prospective_source_signatures,
+        prohibited_mechanism_transfer_target_signatures=prohibited_target_signatures,
         reserved_observation_structure_signatures=tuple(
             sorted({item.structural_signatures.observation_structure_sha256 for item in witnesses})
         ),
         reserved_configuration_signatures=tuple(
             sorted({item.structural_signatures.configuration_sha256 for item in witnesses})
+        ),
+        reserved_causal_scenario_signatures=tuple(
+            sorted({item.structural_signatures.causal_scenario_sha256 for item in witnesses})
+        ),
+        reserved_structural_stratum_signatures=tuple(
+            sorted({item.structural_signatures.structural_stratum_sha256 for item in witnesses})
         ),
         reserved_witness_configuration_signatures=tuple(
             sorted({item.structural_signatures.witness_configuration_sha256 for item in witnesses})
@@ -365,8 +392,26 @@ def _template_registry(authoring: LiteralAuthoringManifest) -> LiteralTemplateRe
 
 def _coverage(config: LoadedLiteralConfig, bindings: Sequence[LiteralItemBinding]) -> None:
     coverage = config.resolved.coverage
-    if len(bindings) < coverage.minimum_semantic_groups:
-        raise ValueError("Literal semantic-group coverage floor is not met")
+    if len(bindings) < coverage.minimum_question_groups:
+        raise ValueError("Literal question-group floor is not met")
+    causal_scenarios = {
+        binding.structural_signatures.causal_scenario_sha256 for binding in bindings
+    }
+    structural_strata = {
+        binding.structural_signatures.structural_stratum_sha256 for binding in bindings
+    }
+    by_causal_scenario: dict[str, set[LiteralTaskFamily]] = {}
+    for binding in bindings:
+        by_causal_scenario.setdefault(
+            binding.structural_signatures.causal_scenario_sha256, set()
+        ).add(binding.task_family)
+    matched_variants = sum(max(0, len(families) - 1) for families in by_causal_scenario.values())
+    if len(causal_scenarios) < coverage.minimum_causal_scenarios:
+        raise ValueError("Literal causal-scenario coverage floor is not met")
+    if len(structural_strata) < coverage.minimum_independent_structural_strata:
+        raise ValueError("Literal independent structural-stratum floor is not met")
+    if matched_variants < coverage.minimum_matched_variants:
+        raise ValueError("Literal cross-family matched-variant floor is not met")
     schemas = Counter(binding.schema_identity for binding in bindings)
     levels = Counter(binding.transfer_level for binding in bindings)
     families = {binding.task_family for binding in bindings}
@@ -541,6 +586,8 @@ def _read_authoring(config: LoadedLiteralConfig) -> LiteralAuthoringManifest:
         or authoring.engineering_only != resolved.engineering_only
         or authoring.scientific_eligible != resolved.scientific_eligible
         or authoring.promotable != resolved.promotable
+        or authoring.generator_version != resolved.generator_version
+        or authoring.partition_plan_version != resolved.partition_plan_version
     ):
         raise ValueError("Literal authoring manifest and tracked configuration disagree")
     scenario_seeds = tuple(sorted(item.seed for item in authoring.scenarios))
@@ -708,10 +755,23 @@ def generate_literal_source(
             raise FileExistsError(f"Literal source staging path already exists: {staging}")
         authoring = _read_authoring(config)
         template_by_id = {item.template_id: item for item in authoring.templates}
-        witnesses = tuple(
-            build_witness(spec, template_by_id[spec.prompt_template_id])
-            for spec in sorted(authoring.scenarios, key=lambda item: item.semantic_group_id)
+        ordered_scenarios = tuple(
+            sorted(authoring.scenarios, key=lambda item: item.semantic_group_id)
         )
+        witness_by_group = {
+            spec.semantic_group_id: build_witness(spec, template_by_id[spec.prompt_template_id])
+            for spec in ordered_scenarios
+            if spec.task_family is not LiteralTaskFamily.PHYSICAL_ANALOGY
+        }
+        for spec in ordered_scenarios:
+            if spec.task_family is LiteralTaskFamily.PHYSICAL_ANALOGY:
+                assert spec.analogy_reference_group_id is not None
+                witness_by_group[spec.semantic_group_id] = build_witness(
+                    spec,
+                    template_by_id[spec.prompt_template_id],
+                    analogy_source=witness_by_group[spec.analogy_reference_group_id],
+                )
+        witnesses = tuple(witness_by_group[spec.semantic_group_id] for spec in ordered_scenarios)
         items, bindings = _source_items(authoring, witnesses)
         _coverage(config, bindings)
         partition = _partition_plan(authoring, witnesses)
@@ -742,20 +802,28 @@ def generate_literal_source(
             items=items,
             bindings=bindings,
             witnesses=witnesses,
+            partition_plan=partition,
         )
         schema_counts = _counts(item.schema_identity.value for item in bindings)
         level_counts = _counts(item.transfer_level.value for item in bindings)
         family_counts = _counts(item.task_family.value for item in bindings)
-        mechanism_counts = _counts(item.source_mechanism.value for item in bindings)
+        source_mechanism_counts = _counts(item.source_mechanism.value for item in bindings)
+        target_mechanism_counts = _counts(item.target_mechanism.value for item in bindings)
         validation_provisional = LiteralValidationReport(
             candidate_version=authoring.candidate_version,
             purpose=authoring.purpose,
             semantic_group_count=len(bindings),
+            question_group_count=split.question_group_count,
+            causal_scenario_count=split.causal_scenario_count,
+            independent_structural_stratum_count=(split.independent_structural_stratum_count),
+            matched_variant_count=split.matched_variant_count,
+            cosmetic_variant_count=split.cosmetic_variant_count,
             source_item_count=len(items),
             schema_counts=schema_counts,
             level_counts=level_counts,
             family_counts=family_counts,
-            mechanism_counts=mechanism_counts,
+            source_mechanism_counts=source_mechanism_counts,
+            target_mechanism_counts=target_mechanism_counts,
             lexical_cue_audit=(
                 "OWNER_REVIEW_REQUIRED"
                 if lexical.status.value == "OWNER_REVIEW_REQUIRED"

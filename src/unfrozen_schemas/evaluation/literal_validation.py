@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from collections import Counter, defaultdict
@@ -30,8 +31,8 @@ from unfrozen_schemas.evaluation.literal_contracts import (
     intervention_contract,
     narrative_facts,
     render_literal_prompt,
-    source_mechanism,
     structural_signatures,
+    target_mechanism,
 )
 from unfrozen_schemas.evaluation.literal_hashing import (
     authoring_snapshot_hash,
@@ -54,6 +55,8 @@ from unfrozen_schemas.evaluation.literal_models import (
     LiteralItemBinding,
     LiteralItemBindingBundle,
     LiteralLexicalAudit,
+    LiteralLexicalCategory,
+    LiteralLexicalCategorySummary,
     LiteralLexicalFinding,
     LiteralOperationRecord,
     LiteralPartition,
@@ -105,6 +108,10 @@ _RAW_VISIBLE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "private-answer-code",
         re.compile(r"\b(?:movement-(?:succeeds|blocked)|object-(?:falls|stays))\b", re.I),
     ),
+    (
+        "evaluation-status-language",
+        re.compile(r"\b(?:held-out|novel|mechanism-transfer|transfer item)\b", re.I),
+    ),
 )
 
 _CAUSAL_TERM_ALLOWLIST: tuple[str, ...] = (
@@ -119,6 +126,49 @@ _CAUSAL_TERM_ALLOWLIST: tuple[str, ...] = (
     "outside",
     "platform",
     "tether",
+)
+
+_TASK_META_TERMS: frozenset[str] = frozenset(
+    {
+        "a",
+        "after",
+        "alternative",
+        "and",
+        "another",
+        "apply",
+        "as",
+        "at",
+        "actual",
+        "before",
+        "causal",
+        "consider",
+        "described",
+        "exactly",
+        "following",
+        "happens",
+        "in",
+        "is",
+        "next",
+        "now",
+        "object",
+        "of",
+        "one",
+        "otherwise",
+        "outcome",
+        "pattern",
+        "physical",
+        "reference",
+        "same",
+        "setup",
+        "setups",
+        "the",
+        "then",
+        "to",
+        "two",
+        "what",
+        "when",
+        "which",
+    }
 )
 
 
@@ -181,13 +231,64 @@ def build_lexical_audit(
     """Derive the deterministic, source-local M2.2 cue audit."""
 
     item_by_id = {item.item_id: item for item in items}
+    binding_by_group = {binding.semantic_group_id: binding for binding in bindings}
     findings: list[LiteralLexicalFinding] = []
     answer_position_counts: Counter[str] = Counter()
     prompt_by_group: dict[str, str] = {}
-    token_outcomes: dict[tuple[str, str], set[str]] = defaultdict(set)
+    association_counts: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
+    association_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
     prompt_lengths: dict[str, list[int]] = defaultdict(list)
     option_lengths_by_class: dict[str, list[int]] = defaultdict(list)
+    distractor_lengths_by_class: dict[str, list[int]] = defaultdict(list)
     option_styles: dict[str, Counter[str]] = defaultdict(Counter)
+    option_pair_differences: Counter[str] = Counter()
+
+    def add_finding(
+        *,
+        category: LiteralLexicalCategory,
+        finding_kind: str,
+        scope: str,
+        value: str,
+        disposition: LiteralAuditStatus,
+        semantic_group_ids: Iterable[str],
+        item_ids: Iterable[str],
+        answer_class_counts: Mapping[str, int],
+        occurrence_support: int,
+    ) -> None:
+        groups = tuple(sorted(set(semantic_group_ids)))
+        addressed_items = tuple(sorted(set(item_ids)))
+        counts = dict(sorted(answer_class_counts.items()))
+        membership = {
+            "semantic_group_ids": groups,
+            "item_ids": addressed_items,
+        }
+        membership_sha256 = hashlib.sha256(canonical_logical_bytes(membership)).hexdigest()
+        identity = {
+            "category": category.value,
+            "finding_kind": finding_kind,
+            "scope": scope,
+            "value": value,
+            "occurrence_support": occurrence_support,
+            "answer_class_counts": counts,
+            "membership_sha256": membership_sha256,
+        }
+        finding_id = "cue-" + hashlib.sha256(canonical_logical_bytes(identity)).hexdigest()[:24]
+        findings.append(
+            LiteralLexicalFinding(
+                finding_id=finding_id,
+                category=category,
+                finding_kind=finding_kind,
+                scope=scope,
+                value=value,
+                occurrence_support=occurrence_support,
+                semantic_group_support=len(groups),
+                answer_class_counts=counts,
+                semantic_group_ids=groups,
+                item_ids=addressed_items,
+                membership_sha256=membership_sha256,
+                disposition=disposition,
+            )
+        )
 
     def style(value: str) -> str:
         stripped = value.strip()
@@ -222,6 +323,19 @@ def build_lexical_audit(
         prompt_lengths[binding.stable_correct_option_id].append(
             len(_tokens(left.model_visible.prompt))
         )
+        left_lengths = {
+            option.option_id: len(_tokens(option.text))
+            for option in left.model_visible.ordered_options
+        }
+        correct_length = left_lengths[binding.stable_correct_option_id]
+        distractor_length = next(
+            length
+            for option_id, length in left_lengths.items()
+            if option_id != binding.stable_correct_option_id
+        )
+        option_lengths_by_class[binding.stable_correct_option_id].append(correct_length)
+        distractor_lengths_by_class[binding.stable_correct_option_id].append(distractor_length)
+        option_pair_differences[str(abs(correct_length - distractor_length))] += 1
         for item in (left, right):
             permutation = item.model_visible.option_permutation
             answer_position_counts[
@@ -235,57 +349,89 @@ def build_lexical_audit(
             for kind, pattern in _RAW_VISIBLE_PATTERNS:
                 match = pattern.search(visible)
                 if match:
-                    findings.append(
-                        LiteralLexicalFinding(
-                            finding_kind=kind,
-                            scope=item.item_id,
-                            value=match.group(0),
-                            disposition=LiteralAuditStatus.FAIL,
-                        )
+                    add_finding(
+                        category=LiteralLexicalCategory.NUISANCE_IDENTIFIER_VOCABULARY,
+                        finding_kind=kind,
+                        scope=item.item_id,
+                        value=match.group(0),
+                        disposition=LiteralAuditStatus.FAIL,
+                        semantic_group_ids=(binding.semantic_group_id,),
+                        item_ids=(item.item_id,),
+                        answer_class_counts={binding.stable_correct_option_id: 1},
+                        occurrence_support=1,
                     )
             normalised_prompt = _normalise_text(item.model_visible.prompt)
             if any(
                 _normalise_text(option.text) in normalised_prompt
                 for option in item.model_visible.ordered_options
             ):
-                findings.append(
-                    LiteralLexicalFinding(
-                        finding_kind="prompt-states-option-consequence",
-                        scope=item.item_id,
-                        value="option text appears in prompt",
-                        disposition=LiteralAuditStatus.FAIL,
-                    )
+                add_finding(
+                    category=LiteralLexicalCategory.ANSWER_CORRELATED_WORDING,
+                    finding_kind="prompt-states-option-consequence",
+                    scope=item.item_id,
+                    value="option text appears in prompt",
+                    disposition=LiteralAuditStatus.FAIL,
+                    semantic_group_ids=(binding.semantic_group_id,),
+                    item_ids=(item.item_id,),
+                    answer_class_counts={binding.stable_correct_option_id: 1},
+                    occurrence_support=1,
                 )
             pair_lengths = [
                 len(_tokens(option.text)) for option in item.model_visible.ordered_options
             ]
-            if max(pair_lengths) - min(pair_lengths) > 4:
-                findings.append(
-                    LiteralLexicalFinding(
-                        finding_kind="option-length-imbalance",
-                        scope=item.item_id,
-                        value=str(pair_lengths),
-                        disposition=LiteralAuditStatus.FAIL,
-                    )
+            if max(pair_lengths) - min(pair_lengths) > 1:
+                add_finding(
+                    category=LiteralLexicalCategory.ANSWER_CORRELATED_WORDING,
+                    finding_kind="option-length-imbalance",
+                    scope=item.item_id,
+                    value=str(pair_lengths),
+                    disposition=LiteralAuditStatus.FAIL,
+                    semantic_group_ids=(binding.semantic_group_id,),
+                    item_ids=(item.item_id,),
+                    answer_class_counts={binding.stable_correct_option_id: 1},
+                    occurrence_support=1,
                 )
             observed_styles = {style(option.text) for option in item.model_visible.ordered_options}
             if len(observed_styles) != 1:
-                findings.append(
-                    LiteralLexicalFinding(
-                        finding_kind="option-style-imbalance",
-                        scope=item.item_id,
-                        value="grammaticality-specificity-or-modality-style-differs",
-                        disposition=LiteralAuditStatus.FAIL,
-                    )
+                add_finding(
+                    category=LiteralLexicalCategory.ANSWER_CORRELATED_WORDING,
+                    finding_kind="option-style-imbalance",
+                    scope=item.item_id,
+                    value="grammaticality-specificity-or-modality-style-differs",
+                    disposition=LiteralAuditStatus.FAIL,
+                    semantic_group_ids=(binding.semantic_group_id,),
+                    item_ids=(item.item_id,),
+                    answer_class_counts={binding.stable_correct_option_id: 1},
+                    occurrence_support=1,
                 )
-        for option in left.model_visible.ordered_options:
-            option_lengths_by_class[option.option_id].append(len(_tokens(option.text)))
-            option_styles[option.option_id][style(option.text)] += 1
+            if any(
+                not option.text.startswith("The object ")
+                for option in item.model_visible.ordered_options
+            ):
+                add_finding(
+                    category=LiteralLexicalCategory.NUISANCE_IDENTIFIER_VOCABULARY,
+                    finding_kind="option-object-reference-mismatch",
+                    scope=item.item_id,
+                    value="options must use the neutral object referent",
+                    disposition=LiteralAuditStatus.FAIL,
+                    semantic_group_ids=(binding.semantic_group_id,),
+                    item_ids=(item.item_id,),
+                    answer_class_counts={binding.stable_correct_option_id: 1},
+                    occurrence_support=1,
+                )
+        correct_option = next(
+            option
+            for option in left.model_visible.ordered_options
+            if option.option_id == binding.stable_correct_option_id
+        )
+        option_styles[binding.stable_correct_option_id][style(correct_option.text)] += 1
         prompt_tokens = _tokens(left.model_visible.prompt)
-        ngrams = set(prompt_tokens)
+        ngrams = Counter(prompt_tokens)
         ngrams.update(f"{first} {second}" for first, second in pairwise(prompt_tokens))
-        for token in ngrams:
-            token_outcomes[(binding.task_family.value, token)].add(binding.stable_correct_option_id)
+        for token, count in ngrams.items():
+            key = (binding.task_family.value, token)
+            association_counts[key][binding.stable_correct_option_id] += count
+            association_groups[key].add(binding.semantic_group_id)
 
     duplicate_groups: list[tuple[str, str]] = []
     group_ids = sorted(prompt_by_group)
@@ -298,59 +444,144 @@ def build_lexical_audit(
     token_sets = {group: set(_tokens(prompt)) for group, prompt in prompt_by_group.items()}
     for index, left_id in enumerate(group_ids):
         for right_id in group_ids[index + 1 :]:
+            if prompt_by_group[left_id] == prompt_by_group[right_id]:
+                continue
             left_tokens = token_sets[left_id]
             right_tokens = token_sets[right_id]
             union = left_tokens | right_tokens
             if union and len(left_tokens & right_tokens) / len(union) >= 0.92:
                 near_pairs.append((left_id, right_id))
 
-    for (family, token), outcomes in sorted(token_outcomes.items()):
-        if len(outcomes) == 1:
-            findings.append(
-                LiteralLexicalFinding(
-                    finding_kind="perfect-family-token-association",
-                    scope=family,
-                    value=token,
-                    disposition=LiteralAuditStatus.OWNER_REVIEW_REQUIRED,
+    for (family, token), counts in sorted(association_counts.items()):
+        if len(counts) != 1:
+            continue
+        association_group_ids = association_groups[(family, token)]
+        parts = set(token.split())
+        if parts <= set(_CAUSAL_TERM_ALLOWLIST):
+            category = LiteralLexicalCategory.NECESSARY_CAUSAL_VOCABULARY
+        elif parts <= _TASK_META_TERMS:
+            category = LiteralLexicalCategory.TASK_META_VOCABULARY
+        else:
+            category = LiteralLexicalCategory.ANSWER_CORRELATED_WORDING
+        disposition = (
+            LiteralAuditStatus.OWNER_REVIEW_REQUIRED
+            if category is LiteralLexicalCategory.ANSWER_CORRELATED_WORDING
+            and len(association_group_ids) >= 2
+            else LiteralAuditStatus.PASS
+        )
+        add_finding(
+            category=category,
+            finding_kind="family-lexical-association",
+            scope=family,
+            value=token,
+            disposition=disposition,
+            semantic_group_ids=association_group_ids,
+            item_ids=(
+                item_id
+                for group in association_group_ids
+                for item_id in next(
+                    binding.item_ids for binding in bindings if binding.semantic_group_id == group
                 )
-            )
+            ),
+            answer_class_counts=counts,
+            occurrence_support=sum(counts.values()),
+        )
 
     template_counts = _answer_counts(bindings, "prompt_template_id")
     action_counts = _answer_counts(bindings, "action_word")
     mechanism_counts = _answer_counts(bindings, "source_mechanism")
-    for label, groups in (
+    target_mechanism_counts = _answer_counts(bindings, "target_mechanism")
+    for label, answer_groups in (
         ("template", template_counts),
         ("action-word", action_counts),
         ("source-mechanism", mechanism_counts),
+        ("target-mechanism", target_mechanism_counts),
     ):
-        for group, counts in groups.items():
-            if len(counts) < 2:
-                findings.append(
-                    LiteralLexicalFinding(
-                        finding_kind=f"{label}-single-answer-class",
-                        scope=group,
-                        value=next(iter(counts)),
-                        disposition=LiteralAuditStatus.OWNER_REVIEW_REQUIRED,
-                    )
+        for group, answer_counts in answer_groups.items():
+            if len(answer_counts) < 2:
+                member_bindings = [
+                    binding
+                    for binding in bindings
+                    if {
+                        "template": binding.prompt_template_id,
+                        "action-word": binding.action_word,
+                        "source-mechanism": binding.source_mechanism.value,
+                        "target-mechanism": binding.target_mechanism.value,
+                    }[label]
+                    == group
+                ]
+                add_finding(
+                    category=LiteralLexicalCategory.ANSWER_CORRELATED_WORDING,
+                    finding_kind=f"{label}-single-answer-class",
+                    scope=group,
+                    value=next(iter(answer_counts)),
+                    disposition=(
+                        LiteralAuditStatus.OWNER_REVIEW_REQUIRED
+                        if sum(answer_counts.values()) >= 2
+                        else LiteralAuditStatus.PASS
+                    ),
+                    semantic_group_ids=(b.semantic_group_id for b in member_bindings),
+                    item_ids=(item_id for b in member_bindings for item_id in b.item_ids),
+                    answer_class_counts=answer_counts,
+                    occurrence_support=sum(answer_counts.values()),
                 )
     for left_id, right_id in near_pairs:
-        findings.append(
-            LiteralLexicalFinding(
-                finding_kind="near-prompt-duplicate",
-                scope="semantic-groups",
-                value=f"{left_id}|{right_id}",
-                disposition=LiteralAuditStatus.OWNER_REVIEW_REQUIRED,
-            )
+        pair_bindings = tuple(
+            binding for binding in bindings if binding.semantic_group_id in {left_id, right_id}
         )
-    if duplicate_groups:
-        findings.append(
-            LiteralLexicalFinding(
-                finding_kind="exact-prompt-duplicate",
-                scope="semantic-groups",
-                value=str(len(duplicate_groups)),
-                disposition=LiteralAuditStatus.FAIL,
-            )
+        add_finding(
+            category=LiteralLexicalCategory.DUPLICATE_WORDING,
+            finding_kind="near-prompt-duplicate",
+            scope="semantic-groups",
+            value=f"{left_id}|{right_id}",
+            disposition=LiteralAuditStatus.OWNER_REVIEW_REQUIRED,
+            semantic_group_ids=(left_id, right_id),
+            item_ids=(item_id for binding in pair_bindings for item_id in binding.item_ids),
+            answer_class_counts=Counter(
+                binding.stable_correct_option_id for binding in pair_bindings
+            ),
+            occurrence_support=2,
         )
+    for left_id, right_id in duplicate_groups:
+        duplicate_bindings = (binding_by_group[left_id], binding_by_group[right_id])
+        causal_scenarios = {
+            binding.structural_signatures.causal_scenario_sha256 for binding in duplicate_bindings
+        }
+        matched_strata = {binding.matched_stratum_id for binding in duplicate_bindings}
+        declared_variant = (
+            len(causal_scenarios) == 1 and len(matched_strata) == 1 and None not in matched_strata
+        )
+        add_finding(
+            category=LiteralLexicalCategory.DUPLICATE_WORDING,
+            finding_kind="exact-prompt-duplicate",
+            scope="semantic-groups",
+            value=f"{left_id}|{right_id}",
+            disposition=(
+                LiteralAuditStatus.OWNER_REVIEW_REQUIRED
+                if declared_variant
+                else LiteralAuditStatus.FAIL
+            ),
+            semantic_group_ids=(left_id, right_id),
+            item_ids=(item_id for binding in duplicate_bindings for item_id in binding.item_ids),
+            answer_class_counts=Counter(
+                binding.stable_correct_option_id for binding in duplicate_bindings
+            ),
+            occurrence_support=2,
+        )
+    opposing_classes = (
+        ("movement-succeeds", "movement-blocked"),
+        ("object-falls", "object-stays"),
+    )
+    for left_class, right_class in opposing_classes:
+        if (
+            left_class in option_lengths_by_class
+            and right_class in option_lengths_by_class
+            and not set(option_lengths_by_class[left_class])
+            & set(option_lengths_by_class[right_class])
+        ):
+            raise ValueError(
+                "Correct-option whitespace length deterministically separates answer classes"
+            )
     failures = [finding for finding in findings if finding.disposition is LiteralAuditStatus.FAIL]
     if failures:
         first = failures[0]
@@ -362,6 +593,35 @@ def build_lexical_audit(
         for finding in findings
         if finding.disposition is LiteralAuditStatus.OWNER_REVIEW_REQUIRED
     ]
+    findings_tuple = tuple(sorted(findings, key=lambda finding: finding.finding_id))
+    category_summaries: list[LiteralLexicalCategorySummary] = []
+    for category in LiteralLexicalCategory:
+        finding_ids = tuple(
+            finding.finding_id for finding in findings_tuple if finding.category is category
+        )
+        owner_required = any(
+            finding.category is category
+            and finding.disposition is LiteralAuditStatus.OWNER_REVIEW_REQUIRED
+            for finding in findings_tuple
+        )
+        category_hash = hashlib.sha256(
+            canonical_logical_bytes(
+                {
+                    "category_version": "literal-lexical-category-v1",
+                    "category": category.value,
+                    "finding_ids": finding_ids,
+                }
+            )
+        ).hexdigest()
+        category_summaries.append(
+            LiteralLexicalCategorySummary(
+                category=category,
+                finding_ids=finding_ids,
+                finding_count=len(finding_ids),
+                owner_disposition_required=owner_required,
+                category_membership_sha256=category_hash,
+            )
+        )
     provisional = LiteralLexicalAudit(
         candidate_version=candidate_version,
         causal_term_allowlist=_CAUSAL_TERM_ALLOWLIST,
@@ -371,18 +631,24 @@ def build_lexical_audit(
         template_answer_counts=template_counts,
         action_word_answer_counts=action_counts,
         source_mechanism_answer_counts=mechanism_counts,
+        target_mechanism_answer_counts=target_mechanism_counts,
         prompt_length_by_answer_class={
             key: summary(value) for key, value in sorted(prompt_lengths.items())
         },
         option_length_by_answer_class={
             key: summary(value) for key, value in sorted(option_lengths_by_class.items())
         },
+        distractor_option_length_by_answer_class={
+            key: summary(value) for key, value in sorted(distractor_lengths_by_class.items())
+        },
         option_style_by_answer_class={
             key: dict(sorted(value.items())) for key, value in sorted(option_styles.items())
         },
+        option_pair_length_difference_counts=dict(sorted(option_pair_differences.items())),
         exact_duplicate_group_count=len(duplicate_groups),
         near_duplicate_group_pairs=tuple(near_pairs),
-        findings=tuple(findings),
+        findings=findings_tuple,
+        category_summaries=tuple(category_summaries),
         unresolved_owner_review_finding_count=len(owner_findings),
         status=(
             LiteralAuditStatus.OWNER_REVIEW_REQUIRED if owner_findings else LiteralAuditStatus.PASS
@@ -398,15 +664,26 @@ def build_split_audit(
     items: Sequence[SourceItemRecord],
     bindings: Sequence[LiteralItemBinding],
     witnesses: Sequence[LiteralWitnessRecord],
+    partition_plan: LiteralPartitionPlan,
 ) -> LiteralSplitAudit:
     item_by_id = {item.item_id: item for item in items}
-    prompt_counts = Counter(
-        _normalise_text(item_by_id[binding.item_ids[0]].model_visible.prompt)
-        for binding in bindings
-    )
-    duplicates = sum(count - 1 for count in prompt_counts.values() if count > 1)
-    if duplicates:
-        raise ValueError("Literal split contains exact prompt duplicates")
+    binding_by_group = {item.semantic_group_id: item for item in bindings}
+    prompt_groups: dict[str, list[LiteralItemBinding]] = defaultdict(list)
+    for binding in bindings:
+        prompt = _normalise_text(item_by_id[binding.item_ids[0]].model_visible.prompt)
+        prompt_groups[prompt].append(binding)
+    duplicates = sum(len(members) - 1 for members in prompt_groups.values() if len(members) > 1)
+    for members in prompt_groups.values():
+        if len(members) < 2:
+            continue
+        causal_scenarios = {
+            member.structural_signatures.causal_scenario_sha256 for member in members
+        }
+        matched_strata = {member.matched_stratum_id for member in members}
+        if len(causal_scenarios) != 1 or len(matched_strata) != 1 or None in matched_strata:
+            raise ValueError(
+                "Exact prompt duplicates must be declared variants of one causal scenario"
+            )
     l2_dimensions = {
         binding.semantic_group_id: binding.structural_novelty_dimensions
         for binding in bindings
@@ -417,7 +694,6 @@ def build_split_audit(
     witness_by_group = {item.semantic_group_id: item for item in witnesses}
     if len(witness_by_group) != len(witnesses):
         raise ValueError("Literal split reuses a witness semantic-group identity")
-    binding_by_group = {item.semantic_group_id: item for item in bindings}
     l1 = [item for item in bindings if item.transfer_level is LiteralTransferLevel.L1]
     l2 = [item for item in bindings if item.transfer_level is LiteralTransferLevel.L2]
     l1_witnesses = [witness_by_group[item.semantic_group_id] for item in l1]
@@ -469,6 +745,14 @@ def build_split_audit(
             raise ValueError(f"L1/L2 exact {label} identities are not disjoint")
     l1_templates = {item.prompt_template_id for item in l1}
     l1_configurations = {item.structural_signatures.configuration_sha256 for item in l1}
+    complete_l1_mechanisms = {item.structural_signatures.target_mechanism_sha256 for item in l1}
+    if complete_l1_mechanisms != set(partition_plan.prohibited_l1_source_mechanism_signatures):
+        raise ValueError("Partition plan does not bind the complete L1 mechanism-source set")
+    expected_prohibited = complete_l1_mechanisms | set(
+        partition_plan.prospective_adaptation_source_mechanism_signatures
+    )
+    if expected_prohibited != set(partition_plan.prohibited_mechanism_transfer_target_signatures):
+        raise ValueError("Partition plan omits a prohibited mechanism-transfer source signature")
     for binding in l2:
         if binding.partition is LiteralPartition.L2_NOVEL_TEMPLATE:
             if binding.prompt_template_id in l1_templates:
@@ -484,17 +768,30 @@ def build_split_audit(
             if reference is None or reference.transfer_level is not LiteralTransferLevel.L1:
                 raise ValueError("Physical analogy lacks its declared L1 reference")
             if (
-                reference.structural_signatures.source_mechanism_sha256
-                == binding.structural_signatures.source_mechanism_sha256
+                binding.source_mechanism is not reference.target_mechanism
+                or binding.structural_signatures.source_mechanism_sha256
+                != reference.structural_signatures.target_mechanism_sha256
+            ):
+                raise ValueError("Physical analogy source identity is not its L1 reference")
+            if (
+                binding.target_mechanism is not target_mechanism(binding.scenario_case)
+                or binding.structural_signatures.target_mechanism_sha256 in expected_prohibited
             ):
                 raise ValueError(
-                    "Physical analogy changes only its label, not its mechanism mapping"
+                    "Mechanism-transfer target is represented in prohibited source material"
                 )
+            if (
+                binding.structural_signatures.source_mechanism_sha256
+                == binding.structural_signatures.target_mechanism_sha256
+            ):
+                raise ValueError("Physical analogy lacks a distinct source-to-target mapping")
 
-    signature_groups: dict[str, list[LiteralItemBinding]] = defaultdict(list)
+    causal_groups: dict[str, list[LiteralItemBinding]] = defaultdict(list)
+    structural_groups: dict[str, list[LiteralItemBinding]] = defaultdict(list)
     for binding in bindings:
-        signature_groups[binding.structural_signatures.configuration_sha256].append(binding)
-    for signature, members in signature_groups.items():
+        causal_groups[binding.structural_signatures.causal_scenario_sha256].append(binding)
+        structural_groups[binding.structural_signatures.structural_stratum_sha256].append(binding)
+    for signature, members in causal_groups.items():
         if len(members) == 1:
             continue
         strata = {item.matched_stratum_id for item in members}
@@ -502,10 +799,23 @@ def build_split_audit(
             raise ValueError(
                 f"Repeated structural signature {signature} lacks one declared matched stratum"
             )
+    matched_variants = sum(
+        max(0, len({member.task_family for member in members}) - 1)
+        for members in causal_groups.values()
+    )
+    cosmetic_variants = sum(
+        len(members) - len({member.task_family for member in members})
+        for members in causal_groups.values()
+    )
 
     provisional = LiteralSplitAudit(
         candidate_version=candidate_version,
         semantic_group_count=len(bindings),
+        question_group_count=len(bindings),
+        causal_scenario_count=len(causal_groups),
+        independent_structural_stratum_count=len(structural_groups),
+        matched_variant_count=matched_variants,
+        cosmetic_variant_count=cosmetic_variants,
         l1_group_count=sum(
             binding.transfer_level is LiteralTransferLevel.L1 for binding in bindings
         ),
@@ -532,9 +842,13 @@ def build_split_audit(
         unique_group_count=len(binding_by_group),
         unique_witness_hash_count=len({item.witness_sha256 for item in witnesses}),
         l2_structural_novelty_dimensions=dict(sorted(l2_dimensions.items())),
+        causal_scenario_groups={
+            signature: tuple(sorted(item.semantic_group_id for item in members))
+            for signature, members in sorted(causal_groups.items())
+        },
         structural_signature_strata={
             signature: tuple(sorted(item.semantic_group_id for item in members))
-            for signature, members in sorted(signature_groups.items())
+            for signature, members in sorted(structural_groups.items())
         },
         exact_prompt_duplicate_count=duplicates,
         split_audit_sha256="0" * 64,
@@ -593,6 +907,8 @@ def verify_witness(
     witness: LiteralWitnessRecord,
     spec: LiteralScenarioSpec,
     template: LiteralTemplate,
+    *,
+    analogy_source: LiteralWitnessRecord | None = None,
 ) -> None:
     """Reconstruct all stored witness claims without trusting stored answers."""
 
@@ -682,6 +998,7 @@ def verify_witness(
         witness.counterfactual_initial_privileged_state,
         witness.actual_actions,
         witness.counterfactual_actions,
+        analogy_source=analogy_source,
     )
     if witness.narrative_facts != expected_facts:
         raise ValueError(f"Typed narrative facts do not reconstruct: {witness.semantic_group_id}")
@@ -694,6 +1011,7 @@ def verify_witness(
         witness.counterfactual_actions,
         actual,
         counterfactual,
+        analogy_source=analogy_source,
     )
     if witness.structural_signatures != expected_signatures:
         raise ValueError(f"Structural signatures do not reconstruct: {witness.semantic_group_id}")
@@ -702,7 +1020,12 @@ def verify_witness(
         spec.schema_identity,
         spec.transfer_level,
         spec.task_family,
-        source_mechanism(spec.scenario_case),
+        (
+            analogy_source.target_mechanism
+            if analogy_source is not None
+            else target_mechanism(spec.scenario_case)
+        ),
+        target_mechanism(spec.scenario_case),
         spec.prompt_template_id,
         spec.partition,
         spec.scenario_case,
@@ -717,6 +1040,7 @@ def verify_witness(
         witness.transfer_level,
         witness.task_family,
         witness.source_mechanism,
+        witness.target_mechanism,
         witness.prompt_template_id,
         witness.partition,
         witness.scenario_case,
@@ -853,7 +1177,12 @@ def validate_loaded_literal_source(
             raise ValueError(f"Item binding has no matching witness: {binding.semantic_group_id}")
         spec = scenario_by_group[binding.semantic_group_id]
         template = template_by_id[spec.prompt_template_id]
-        verify_witness(witness, spec, template)
+        analogy_source = (
+            witness_by_group[spec.analogy_reference_group_id]
+            if spec.analogy_reference_group_id is not None
+            else None
+        )
+        verify_witness(witness, spec, template, analogy_source=analogy_source)
         expected_binding_fields = (
             witness.item_ids,
             spec.outcome_text_record_ids,
@@ -861,6 +1190,7 @@ def validate_loaded_literal_source(
             spec.transfer_level,
             spec.task_family,
             witness.source_mechanism,
+            witness.target_mechanism,
             spec.prompt_template_id,
             spec.partition,
             spec.scenario_case,
@@ -879,6 +1209,7 @@ def validate_loaded_literal_source(
             binding.transfer_level,
             binding.task_family,
             binding.source_mechanism,
+            binding.target_mechanism,
             binding.prompt_template_id,
             binding.partition,
             binding.scenario_case,
@@ -993,22 +1324,30 @@ def validate_loaded_literal_source(
         items=loaded.items,
         bindings=bindings,
         witnesses=witnesses,
+        partition_plan=loaded.partition_plan,
     )
     if rebuilt_split != loaded.split_audit:
         raise ValueError("Literal split audit does not reconstruct")
     schema_counts = _count(binding.schema_identity.value for binding in bindings)
     level_counts = _count(binding.transfer_level.value for binding in bindings)
     family_counts = _count(binding.task_family.value for binding in bindings)
-    mechanism_counts = _count(binding.source_mechanism.value for binding in bindings)
+    source_mechanism_counts = _count(binding.source_mechanism.value for binding in bindings)
+    target_mechanism_counts = _count(binding.target_mechanism.value for binding in bindings)
     provisional = LiteralValidationReport(
         candidate_version=version,
         purpose=purpose,
         semantic_group_count=len(bindings),
+        question_group_count=rebuilt_split.question_group_count,
+        causal_scenario_count=rebuilt_split.causal_scenario_count,
+        independent_structural_stratum_count=(rebuilt_split.independent_structural_stratum_count),
+        matched_variant_count=rebuilt_split.matched_variant_count,
+        cosmetic_variant_count=rebuilt_split.cosmetic_variant_count,
         source_item_count=len(loaded.items),
         schema_counts=schema_counts,
         level_counts=level_counts,
         family_counts=family_counts,
-        mechanism_counts=mechanism_counts,
+        source_mechanism_counts=source_mechanism_counts,
+        target_mechanism_counts=target_mechanism_counts,
         lexical_cue_audit=(
             "OWNER_REVIEW_REQUIRED"
             if loaded.lexical_audit.status is LiteralAuditStatus.OWNER_REVIEW_REQUIRED
@@ -1186,6 +1525,7 @@ def review_content_records(
                 "partition": binding.partition,
                 "scenario_case": binding.scenario_case,
                 "source_mechanism": binding.source_mechanism,
+                "target_mechanism": binding.target_mechanism,
                 "structural_novelty_dimensions": binding.structural_novelty_dimensions,
                 "structural_signatures": binding.structural_signatures,
                 "prompt": left.model_visible.prompt,

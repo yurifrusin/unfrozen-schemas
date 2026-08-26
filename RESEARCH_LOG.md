@@ -226,6 +226,34 @@ These corrections strengthen prospective semantic and review integrity before ow
 treatment visibility. They do not validate naturalness, rights, ethics, human interpretation,
 construct validity, model learning, transfer, or any Phase I gate criterion.
 
+### 2026-08-26 — Question form is not an independent causal observation
+
+Independent scientific review identified three related construct-validity errors: a mechanism target
+was labelled as its source and compared only with one chosen reference; prompt groups were counted
+as if wording changes created independent causal evidence; and support-one lexical observations made
+owner review effectively unbounded. These are semantic errors even when every stored hash and
+simulator answer reconstructs.
+
+The corrected contract binds a physical analogy to an explicit L1 source episode and a separate
+target mechanism identity. A target is ineligible for mechanism transfer if its signature appears
+anywhere in the complete L1 or prospectively declared adaptation-source sets. Canonical causal
+scenario and order-independent structural-stratum hashes exclude seed, scene label, nouns, and
+template identity. Cross-family variants remain useful matched measurements, but same-family
+cosmetic repeats are reported separately and satisfy no unique-scenario coverage floor.
+
+Model-visible content now uses one neutral object referent and natural task questions without
+evaluation-status language. Option pairs are prospectively parallel before scoring. Lexical
+associations retain support, answer counts, and enumerated members; support-one observations do not
+need individual acceptance, while versioned category membership hashes make category-level owner
+decisions reproducible and consequential findings remain item-addressable. Tokenizer-specific
+length testing belongs to M2.4 and is not inferred from whitespace parity.
+
+Review visibility is evidential rather than cosmetic: the original scientific 128x128 pixels remain
+bound unchanged, while a separate deterministic zoom binds its raw pixels to that full frame and
+adds visible connection geometry. Neither view promotes PNG container bytes into a scientific
+identity. These changes remain candidate-engineering evidence pending independent rereview; they do
+not establish human validity, rights, ethics, model transfer, or a Phase I result.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>

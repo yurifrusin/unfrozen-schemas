@@ -8,12 +8,15 @@ import socket
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
+from unfrozen_schemas.envs.schema_world.renderer import BACKGROUND
 from unfrozen_schemas.evaluation.benchmark_lifecycle import build_benchmark
 from unfrozen_schemas.evaluation.benchmark_models import BenchmarkPurpose
 from unfrozen_schemas.evaluation.benchmark_persistence import (
     make_artifact_records,
     read_canonical_model,
+    read_jsonl_models,
     write_canonical_json,
 )
 from unfrozen_schemas.evaluation.benchmark_validation import validate_benchmark_manifest
@@ -24,8 +27,10 @@ from unfrozen_schemas.evaluation.literal_hashing import (
 )
 from unfrozen_schemas.evaluation.literal_models import (
     LiteralCandidateManifest,
+    LiteralCueDispositionRecord,
     LiteralOperationError,
     LiteralOperationRecord,
+    LiteralReviewItem,
     LiteralReviewManifest,
     LiteralSourceBundleManifest,
 )
@@ -120,32 +125,51 @@ def test_complete_pipeline_and_regression_hashes(literal_pipeline: Pipeline) -> 
     assert composite.semantic_group_count == 8
     assert composite.source_item_count == 16
     assert composite.authoring_snapshot_sha256 == (
-        "296687d0e6b41851e867ad55a27093a883ea257479e2db6292f2604dac719d1c"
+        "71fad8211ae65f71548a85af713f9314ca56033e3eb00da320db43855dc9e2ca"
     )
     assert composite.m2_1_candidate_bundle_root_sha256 == (
-        "355438abf1e7e4287f30b50d9825cf4d6aa02c6ec3e346f2808714386b4cf9a3"
+        "b2db23f28ad841c83900be5c488b0e65368beb67be17d69663b3e9034764518b"
     )
     assert composite.partition_plan_sha256 == (
-        "e2ef6e1314c4b221d1d4d8061750abc6613e216582577f16e991832ed1873daf"
+        "8d5978ae90ada2c725db19d029c6a789495f56a48a01755f061f278673bbdda1"
     )
     assert composite.template_registry_sha256 == (
-        "bedcc5253794c43ea8be154db83b8110da22e44411f1feff90bd49b49ceaa357"
+        "7ec1508923f21a779fa4f038fbc72a48b6b9808df967f128050be607b8d4fc0b"
     )
     assert composite.witness_bundle_sha256 == (
-        "b58fdd790b27c547876144f1fe83b189b41bda8bc239081a16d618b1703bff36"
+        "afc6b013c42de6152243b18aebb621ea7ed0b9152490b22cfbfeb34be17da8df"
     )
     assert composite.literal_validation_report_sha256 == (
-        "bc47c03f75fc8d95c9a6e29c0cee6b21409e983eedebe4cc0039742df9b19a00"
+        "32be1e8af71d11b6b69dfa76e41bc84a81cd46d75f7be09381a196ba17d72d11"
     )
     assert composite.literal_candidate_root_sha256 == (
-        "4f6190db4eaa3f5835e54056e01ff48f318c815dd40ca3e0380c2a0369ff208e"
+        "23a3e1a75adf70fecacf1f7fab4fdc350a2bd68cbf60b0a23c3840a341a235d7"
     )
     assert review_manifest.review_operation_sha256
     assert review_manifest.review_manifest_sha256 == (
-        "7efae877074aa398c0781f50e7f303458d4068b067d3c7554fd32c8f66e0bba9"
+        "21a7466cefb2acbe13a462c6ff7bb81740a93a7d8c739c6271e2790bc5851102"
     )
-    assert len(review_manifest.render_records) == 4 * composite.semantic_group_count
-    assert len({record.path for record in review_manifest.render_records}) == 32
+    assert len(review_manifest.render_records) == 8 * composite.semantic_group_count
+    assert len({record.path for record in review_manifest.render_records}) == 64
+    assert (
+        sum(
+            record.view_kind == "scientific-full-frame" for record in review_manifest.render_records
+        )
+        == 32
+    )
+    assert sum(record.view_kind == "review-zoom" for record in review_manifest.render_records) == 32
+    assert all(
+        record.scientific_render_sha256 is not None
+        and record.source_full_frame_raw_pixel_sha256 is None
+        for record in review_manifest.render_records
+        if record.view_kind == "scientific-full-frame"
+    )
+    assert all(
+        record.scientific_render_sha256 is None
+        and record.source_full_frame_raw_pixel_sha256 is not None
+        for record in review_manifest.render_records
+        if record.view_kind == "review-zoom"
+    )
 
 
 def test_validation_is_strictly_read_only(
@@ -315,6 +339,40 @@ def test_review_artifact_and_decoded_png_mutations_are_rejected(
     checklist.write_text(checklist.read_text(encoding="utf-8") + "mutation\n", encoding="utf-8")
     with pytest.raises(ValueError, match=r"Artifact (size|SHA-256) mismatch"):
         validate_literal_review(review_root=review, source_root=source)
+
+
+def test_review_zoom_is_bound_to_full_frame_and_magnifies_support_geometry(
+    literal_pipeline: Pipeline,
+) -> None:
+    _source, _candidate, _manifest, review, _composite, review_manifest = literal_pipeline
+    review_items = read_jsonl_models(
+        review / "item_review.jsonl", LiteralReviewItem, require_canonical=True
+    )
+    assert all(len(item.full_frame_render_paths) == 4 for item in review_items)
+    assert all(len(item.review_zoom_render_paths) == 4 for item in review_items)
+    support_item = next(item for item in review_items if item.schema_identity.value == "SUPPORT")
+    full_path = review / support_item.full_frame_render_paths[0]
+    zoom_path = review / support_item.review_zoom_render_paths[0]
+    with Image.open(full_path) as image:
+        full_pixels = tuple(image.convert("RGB").get_flattened_data())
+    with Image.open(zoom_path) as image:
+        zoom_pixels = tuple(image.convert("RGB").get_flattened_data())
+    full_non_background = sum(pixel != BACKGROUND for pixel in full_pixels)
+    zoom_non_background = sum(pixel != BACKGROUND for pixel in zoom_pixels)
+    assert zoom_non_background > full_non_background
+    zoom_relative = zoom_path.relative_to(review).as_posix()
+    full_relative = full_path.relative_to(review).as_posix()
+    zoom_record = next(
+        record for record in review_manifest.render_records if record.path == zoom_relative
+    )
+    full_record = next(
+        record for record in review_manifest.render_records if record.path == full_relative
+    )
+    assert zoom_record.source_full_frame_raw_pixel_sha256 == full_record.raw_pixel_sha256
+
+    cue = read_canonical_model(review / "cue_disposition_pending.json", LiteralCueDispositionRecord)
+    assert cue.required_category_membership_hashes
+    assert not hasattr(cue, "required_finding_indexes")
 
 
 def test_post_publication_source_failure_quarantines_and_records_original(

@@ -2,8 +2,8 @@ schema_version: "1"
 candidate_version: m2-2-literal-candidate-v1
 purpose: outcome
 environment_version: schemaworld-core-v1
-generator_version: literal-generator-v1
-partition_plan_version: literal-partition-plan-v1
+generator_version: literal-generator-v2
+partition_plan_version: literal-partition-plan-v2
 authoring_manifest: benchmarks/source/m2-2-literal-candidate-v1/literal_authoring.json
 source_root: benchmarks/source/m2-2-literal-candidate-v1
 candidate_root: benchmarks/private/m2-2-literal-candidate-v1
@@ -58,7 +58,10 @@ generation_seeds:
   - 22047
   - 22048
 coverage:
-  minimum_semantic_groups: 48
+  minimum_question_groups: 48
+  minimum_causal_scenarios: 28
+  minimum_independent_structural_strata: 28
+  minimum_matched_variants: 14
   records_per_group: 2
   required_schemas: [CONTAINMENT, SUPPORT]
   required_levels: [L1, L2]

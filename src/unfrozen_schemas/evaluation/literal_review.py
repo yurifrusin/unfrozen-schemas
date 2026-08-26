@@ -14,7 +14,8 @@ from typing import Any
 from PIL import Image
 
 from unfrozen_schemas.config import find_repository_root, sha256_file
-from unfrozen_schemas.envs.schema_world.renderer import render_raw_pixels, save_png
+from unfrozen_schemas.envs.schema_world.renderer import BACKGROUND, render_raw_pixels, save_png
+from unfrozen_schemas.envs.schema_world.state import Attachment, EntityRole, Tether, WorldState
 from unfrozen_schemas.evaluation.benchmark_models import CandidateManifest
 from unfrozen_schemas.evaluation.benchmark_persistence import (
     make_artifact_records,
@@ -40,8 +41,10 @@ from unfrozen_schemas.evaluation.literal_hashing import (
     validation_report_hash,
 )
 from unfrozen_schemas.evaluation.literal_models import (
+    LiteralAuditStatus,
     LiteralCandidateManifest,
     LiteralCueDispositionRecord,
+    LiteralLexicalCategory,
     LiteralOperationError,
     LiteralOperationRecord,
     LiteralOperationResult,
@@ -568,7 +571,7 @@ def _review_items(
     for binding in loaded.item_bindings.bindings:
         witness = witnesses[binding.semantic_group_id]
         left, right = (items[item_id] for item_id in binding.item_ids)
-        render_paths = tuple(
+        full_frame_render_paths = tuple(
             f"renders/{binding.semantic_group_id}-{suffix}.png"
             for suffix in (
                 "actual-before",
@@ -577,17 +580,14 @@ def _review_items(
                 "counterfactual-after",
             )
         )
-        relevant_scopes = {
-            *binding.item_ids,
-            binding.semantic_group_id,
-            binding.task_family.value,
-            binding.prompt_template_id,
-            binding.action_word,
-            binding.source_mechanism.value,
-            "semantic-groups",
-        }
+        review_zoom_render_paths = tuple(
+            path.replace(".png", "-zoom.png") for path in full_frame_render_paths
+        )
         cue_findings = tuple(
-            finding for finding in loaded.lexical_audit.findings if finding.scope in relevant_scopes
+            finding
+            for finding in loaded.lexical_audit.findings
+            if binding.semantic_group_id in finding.semantic_group_ids
+            or bool(set(binding.item_ids) & set(finding.item_ids))
         )
         result.append(
             LiteralReviewItem(
@@ -599,6 +599,7 @@ def _review_items(
                 task_family=binding.task_family,
                 scenario_case=binding.scenario_case,
                 source_mechanism=binding.source_mechanism,
+                target_mechanism=binding.target_mechanism,
                 structural_novelty_dimensions=binding.structural_novelty_dimensions,
                 structural_signatures=binding.structural_signatures,
                 prompt=left.model_visible.prompt,
@@ -643,7 +644,8 @@ def _review_items(
                     if loaded.source_manifest.engineering_only
                     else "owner_review_pending"
                 ),
-                render_paths=render_paths,
+                full_frame_render_paths=full_frame_render_paths,
+                review_zoom_render_paths=review_zoom_render_paths,
                 authoring_snapshot_sha256=composite.authoring_snapshot_sha256,
                 literal_candidate_root_sha256=composite.literal_candidate_root_sha256,
                 witness_bundle_sha256=composite.witness_bundle_sha256,
@@ -684,6 +686,152 @@ def _review_render_states(loaded: LoadedLiteralSource) -> tuple[tuple[str, Any],
     return tuple(records)
 
 
+def _set_pixel(
+    pixels: bytearray,
+    *,
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+    colour: tuple[int, int, int],
+) -> None:
+    if 0 <= x < width and 0 <= y < height:
+        offset = 3 * (y * width + x)
+        pixels[offset : offset + 3] = bytes(colour)
+
+
+def _draw_line(
+    pixels: bytearray,
+    *,
+    width: int,
+    height: int,
+    start: tuple[int, int],
+    end: tuple[int, int],
+    colour: tuple[int, int, int],
+) -> None:
+    x0, y0 = start
+    x1, y1 = end
+    delta_x = abs(x1 - x0)
+    step_x = 1 if x0 < x1 else -1
+    delta_y = -abs(y1 - y0)
+    step_y = 1 if y0 < y1 else -1
+    error = delta_x + delta_y
+    while True:
+        for offset_x, offset_y in ((0, 0), (1, 0), (0, 1)):
+            _set_pixel(
+                pixels,
+                width=width,
+                height=height,
+                x=x0 + offset_x,
+                y=y0 + offset_y,
+                colour=colour,
+            )
+        if (x0, y0) == (x1, y1):
+            break
+        doubled = 2 * error
+        if doubled >= delta_y:
+            error += delta_y
+            x0 += step_x
+        if doubled <= delta_x:
+            error += delta_x
+            y0 += step_y
+
+
+def _entity_centre(state: WorldState, entity_id: str, *, size: int) -> tuple[int, int]:
+    entity = state.entity(entity_id)
+    x = (2 * entity.x + entity.width) * size // (2 * state.coordinate_max)
+    y = size - (2 * entity.y + entity.height) * size // (2 * state.coordinate_max)
+    return x, y
+
+
+def _review_zoom_pixels(state: WorldState, full_pixels: bytes) -> tuple[bytes, str]:
+    """Create a deterministic review-only detail view while preserving the full render."""
+
+    size = 128
+    overlaid = bytearray(full_pixels)
+    connections: tuple[Attachment | Tether, ...] = (*state.attachments, *state.tethers)
+    for connection in connections:
+        _draw_line(
+            overlaid,
+            width=size,
+            height=size,
+            start=_entity_centre(state, connection.object_id, size=size),
+            end=_entity_centre(state, connection.anchor_id, size=size),
+            colour=(43, 47, 54) if connection.active else (174, 179, 188),
+        )
+    relevant_roles = {
+        EntityRole.OBJECT,
+        EntityRole.SUPPORT,
+        EntityRole.ANCHOR,
+        EntityRole.CONTAINER,
+        EntityRole.GATE,
+    }
+    relevant = [entity for entity in state.entities if entity.role in relevant_roles]
+    if not relevant:
+        raise ValueError("Review zoom has no inspectable physical entities")
+    left = min(entity.x for entity in relevant) * size // state.coordinate_max
+    right = max(entity.x + entity.width for entity in relevant) * size // state.coordinate_max
+    top = size - max(entity.y + entity.height for entity in relevant) * size // state.coordinate_max
+    bottom = size - min(entity.y for entity in relevant) * size // state.coordinate_max
+    padding = 4
+    left = max(0, left - padding)
+    right = min(size, max(left + 1, right + padding))
+    top = max(0, top - padding)
+    bottom = min(size, max(top + 1, bottom + padding))
+    crop_width = right - left
+    crop_height = bottom - top
+    scale = min((size - 8) / crop_width, (size - 8) / crop_height)
+    output_width = max(1, int(crop_width * scale))
+    output_height = max(1, int(crop_height * scale))
+    offset_x = (size - output_width) // 2
+    offset_y = (size - output_height) // 2
+    source_image = Image.frombytes("RGB", (size, size), bytes(overlaid))
+    crop = source_image.crop((left, top, right, bottom)).resize(
+        (output_width, output_height), resample=Image.Resampling.NEAREST
+    )
+    zoom = Image.new("RGB", (size, size), BACKGROUND)
+    zoom.paste(crop, (offset_x, offset_y))
+    raw = zoom.tobytes()
+    logical = canonical_record_sha256(
+        {
+            "view_kind": "literal-review-zoom-v1",
+            "source_full_frame_raw_pixel_sha256": hashlib.sha256(full_pixels).hexdigest(),
+            "raw_pixel_sha256": hashlib.sha256(raw).hexdigest(),
+            "width": size,
+            "height": size,
+            "mode": "RGB",
+        }
+    )
+    return raw, logical
+
+
+def _cue_disposition(
+    loaded: LoadedLiteralSource, composite: LiteralCandidateManifest
+) -> LiteralCueDispositionRecord:
+    required = {
+        summary.category: summary.category_membership_sha256
+        for summary in loaded.lexical_audit.category_summaries
+        if summary.owner_disposition_required
+    }
+    consequential = tuple(
+        finding.finding_id
+        for finding in loaded.lexical_audit.findings
+        if finding.disposition is not LiteralAuditStatus.PASS
+        and finding.category
+        in {
+            LiteralLexicalCategory.NUISANCE_IDENTIFIER_VOCABULARY,
+            LiteralLexicalCategory.DUPLICATE_WORDING,
+        }
+    )
+    return LiteralCueDispositionRecord(
+        candidate_version=composite.candidate_version,
+        lexical_audit_sha256=composite.lexical_audit_sha256,
+        candidate_root_sha256=composite.literal_candidate_root_sha256,
+        required_category_membership_hashes=dict(sorted(required.items())),
+        consequential_finding_ids=consequential,
+    )
+
+
 def _render_bundle_hash(records: tuple[LiteralRenderRecord, ...]) -> str:
     return canonical_record_sha256(
         {"render_records": [record.model_dump(mode="json") for record in records]}
@@ -695,7 +843,7 @@ def _after_literal_review_publication(_output: Path) -> None:
 
 
 def build_literal_review(*, source_root: Path, output_root: Path) -> LiteralOperationResult:
-    """Atomically build a private review bundle with four renders per group."""
+    """Atomically build a private review bundle with full and zoomed renders."""
 
     loaded, composite, report, materialization = _load_materialized_source(source_root)
     output = output_root.resolve()
@@ -722,17 +870,7 @@ def build_literal_review(*, source_root: Path, output_root: Path) -> LiteralOper
             staging / "pending_owner_review.json",
             pending_owner_review(composite.candidate_version),
         )
-        cue_disposition = LiteralCueDispositionRecord(
-            candidate_version=composite.candidate_version,
-            lexical_audit_sha256=composite.lexical_audit_sha256,
-            candidate_root_sha256=composite.literal_candidate_root_sha256,
-            required_finding_indexes=tuple(
-                range(loaded.lexical_audit.unresolved_owner_review_finding_count)
-            ),
-            near_duplicate_disposition_required=bool(
-                loaded.lexical_audit.near_duplicate_group_pairs
-            ),
-        )
+        cue_disposition = _cue_disposition(loaded, composite)
         write_canonical_json(staging / CUE_DISPOSITION_FILE, cue_disposition)
         _write_markdown(
             staging / "aggregate_summary.md",
@@ -741,6 +879,11 @@ def build_literal_review(*, source_root: Path, output_root: Path) -> LiteralOper
                 f"Candidate version: `{composite.candidate_version}`",
                 f"Purpose: `{composite.purpose}`",
                 f"Semantic groups: {composite.semantic_group_count}",
+                f"Question groups: {report.question_group_count}",
+                f"Causal scenarios: {report.causal_scenario_count}",
+                (f"Independent structural strata: {report.independent_structural_stratum_count}"),
+                f"Cross-family matched variants: {report.matched_variant_count}",
+                f"Cosmetic variants (not unique coverage): {report.cosmetic_variant_count}",
                 f"Source records: {composite.source_item_count}",
                 f"Lexical status: `{loaded.lexical_audit.status.value}`",
                 "Status: `CANDIDATE_VALIDATED_OWNER_REVIEW_PENDING`",
@@ -765,11 +908,26 @@ def build_literal_review(*, source_root: Path, output_root: Path) -> LiteralOper
         for relative, state in _review_render_states(loaded):
             pixels, scientific_hash = render_raw_pixels(state, width=128, height=128)
             save_png(staging / relative, pixels, width=128, height=128)
+            full_raw_hash = hashlib.sha256(pixels).hexdigest()
             render_records.append(
                 LiteralRenderRecord(
                     path=relative,
-                    raw_pixel_sha256=hashlib.sha256(pixels).hexdigest(),
+                    view_kind="scientific-full-frame",
+                    raw_pixel_sha256=full_raw_hash,
+                    logical_render_sha256=scientific_hash,
                     scientific_render_sha256=scientific_hash,
+                )
+            )
+            zoom_relative = relative.replace(".png", "-zoom.png")
+            zoom_pixels, zoom_hash = _review_zoom_pixels(state, pixels)
+            save_png(staging / zoom_relative, zoom_pixels, width=128, height=128)
+            render_records.append(
+                LiteralRenderRecord(
+                    path=zoom_relative,
+                    view_kind="review-zoom",
+                    raw_pixel_sha256=hashlib.sha256(zoom_pixels).hexdigest(),
+                    logical_render_sha256=zoom_hash,
+                    source_full_frame_raw_pixel_sha256=full_raw_hash,
                 )
             )
         render_tuple = tuple(sorted(render_records, key=lambda item: item.path))
@@ -995,8 +1153,29 @@ def validate_literal_review(*, review_root: Path, source_root: Path) -> LiteralR
         expected_render_records.append(
             LiteralRenderRecord(
                 path=relative,
+                view_kind="scientific-full-frame",
                 raw_pixel_sha256=hashlib.sha256(decoded).hexdigest(),
+                logical_render_sha256=scientific_hash,
                 scientific_render_sha256=scientific_hash,
+            )
+        )
+        zoom_relative = relative.replace(".png", "-zoom.png")
+        expected_zoom, zoom_hash = _review_zoom_pixels(state, expected_pixels)
+        zoom_path = root / zoom_relative
+        with Image.open(zoom_path) as image:
+            image.load()
+            if image.format != "PNG" or image.mode != "RGB" or image.size != (128, 128):
+                raise ValueError(f"Review zoom format/mode/dimensions invalid: {zoom_relative}")
+            decoded_zoom = image.tobytes()
+        if decoded_zoom != expected_zoom:
+            raise ValueError(f"Review zoom decoded pixels differ from replay: {zoom_relative}")
+        expected_render_records.append(
+            LiteralRenderRecord(
+                path=zoom_relative,
+                view_kind="review-zoom",
+                raw_pixel_sha256=hashlib.sha256(decoded_zoom).hexdigest(),
+                logical_render_sha256=zoom_hash,
+                source_full_frame_raw_pixel_sha256=hashlib.sha256(decoded).hexdigest(),
             )
         )
     render_records = tuple(sorted(expected_render_records, key=lambda item: item.path))
@@ -1013,15 +1192,7 @@ def validate_literal_review(*, review_root: Path, source_root: Path) -> LiteralR
     if pending != pending_owner_review(manifest.candidate_version):
         raise ValueError("Pending owner-review record does not reconstruct")
     cue = read_canonical_model(root / CUE_DISPOSITION_FILE, LiteralCueDispositionRecord)
-    expected_cue = LiteralCueDispositionRecord(
-        candidate_version=composite.candidate_version,
-        lexical_audit_sha256=composite.lexical_audit_sha256,
-        candidate_root_sha256=composite.literal_candidate_root_sha256,
-        required_finding_indexes=tuple(
-            range(loaded.lexical_audit.unresolved_owner_review_finding_count)
-        ),
-        near_duplicate_disposition_required=bool(loaded.lexical_audit.near_duplicate_group_pairs),
-    )
+    expected_cue = _cue_disposition(loaded, composite)
     if cue != expected_cue:
         raise ValueError("Cue-disposition template does not reconstruct")
     operation = read_canonical_model(root / REVIEW_OPERATION_FILE, LiteralOperationRecord)

@@ -106,7 +106,7 @@ uv run unfrozen validate-literal-review `
   --review <isolated-review-output>
 ```
 
-This fixture uses synthetic status codes and real Core replay only. It contains no candidate wording,
+This fixture uses synthetic setup/result terms and real Core replay only. It contains no candidate wording,
 does no scoring/model/GPU work, and cannot freeze or approve `v1_core`. The real M2.2 outcome source,
 candidate, and review bundle remain ignored and local. See `docs/literal-benchmark.md`.
 

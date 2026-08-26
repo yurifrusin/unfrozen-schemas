@@ -1,12 +1,12 @@
 {
-  "schema_version": "2",
+  "schema_version": "3",
   "authoring_kind": "private_literal_authoring",
   "candidate_version": "engineering-literal-fixture-v1",
   "purpose": "engineering",
   "environment_version": "schemaworld-core-v1",
-  "generator_version": "literal-generator-v1",
-  "partition_plan_version": "literal-partition-plan-v1",
-  "outcome_text_registry_version": "literal-outcome-text-registry-v1",
+  "generator_version": "literal-generator-v2",
+  "partition_plan_version": "literal-partition-plan-v2",
+  "outcome_text_registry_version": "literal-outcome-text-registry-v2",
   "engineering_only": true,
   "scientific_eligible": false,
   "promotable": false,
@@ -40,22 +40,22 @@
     {
       "text_id": "outcome-001",
       "outcome_code": "movement-succeeds",
-      "text": "Status alpha is recorded."
+      "text": "The object receives the expected alpha result."
     },
     {
       "text_id": "outcome-002",
       "outcome_code": "movement-blocked",
-      "text": "Status beta is recorded."
+      "text": "The object receives the expected beta result."
     },
     {
       "text_id": "outcome-003",
       "outcome_code": "object-falls",
-      "text": "Status gamma is recorded."
+      "text": "The object receives the expected gamma result."
     },
     {
       "text_id": "outcome-004",
       "outcome_code": "object-stays",
-      "text": "Status delta is recorded."
+      "text": "The object receives the expected delta result."
     }
   ],
   "scenarios": [
@@ -275,5 +275,9 @@
   "prospective_adaptation_strata": [
     "fixture-adaptation-a",
     "fixture-adaptation-b"
+  ],
+  "prospective_adaptation_source_mechanism_signatures": [
+    "1111111111111111111111111111111111111111111111111111111111111111",
+    "2222222222222222222222222222222222222222222222222222222222222222"
   ]
 }
