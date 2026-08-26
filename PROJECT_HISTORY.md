@@ -131,6 +131,57 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
   this closeout; Milestone 2 was not begun. No benchmark, LLM, tokenizer, training, or GPU work
   occurred during closeout.
 
+### 2026-08-25 — Milestone 2 M2.1 branch start
+
+- Canonical branch point: `73a787b3f0c25b78962ac13fb3b26c1cc50f0dae`, equal to local
+  `main`, `origin/main`, and the target of annotated `milestone-1-complete` at preflight.
+- Branch: `codex/milestone-2-m2-1-benchmark-lifecycle`.
+- Prior tag object: `21a5e615553cf63ddb1da91000889bb8ee657a21`.
+- Revision 6 `CODEX_SPEC.md` SHA-256:
+  `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`.
+- Active main ruleset: `21295385`, requiring pull requests, resolved conversations, and strict
+  required `cpu`; deletion and non-fast-forward updates remain prohibited.
+- Work is limited to M2.1 benchmark schema/lifecycle mechanics and one non-scientific engineering
+  fixture. No M2.2-M2.6 content, model, GPU, selection probe, or production freeze is part of it.
+- Status: implementation work in progress; no merge, tag, release, benchmark freeze, or Milestone 2
+  completion has occurred.
+
+## 2026-08-26
+
+### Milestone 2 M2.1 pre-merge integrity correction
+
+- Continued on `codex/milestone-2-m2-1-benchmark-lifecycle` and pull request
+  `https://github.com/yurifrusin/unfrozen-schemas/pull/5` from pre-correction head
+  `e68bd1fc91a32674008383121df5779722110522`.
+- Replaced optional operator-supplied purpose comparison with a mandatory hash-bound scan of every
+  canonical benchmark root for non-engineering candidates; engineering fixtures retain only an
+  explicit empty scope.
+- Hardened purpose-neutral fingerprints, reverse-pair equivalence, recursive public-data isolation,
+  candidate/header and operation consistency, atomic post-publication failure, benchmark-version
+  path resolution, and the tracked benchmark-path allowlist.
+- Recalculated the engineering-only regression identities because quarantine declarations and
+  identities now participate in the source, candidate, public, approval, and frozen chains. The
+  purpose-bound representative visible-item and private-answer hashes remain unchanged.
+- Status: correction remains part of the open M2.1 implementation PR. No merge, tag, release,
+  production benchmark content, M2.2 work, model access, or GPU work has occurred.
+
+### Milestone 2 M2.1 canonical-storage correction
+
+- Continued on `codex/milestone-2-m2-1-benchmark-lifecycle` and pull request
+  `https://github.com/yurifrusin/unfrozen-schemas/pull/5` from pre-correction head
+  `23ce324f6fa8865d3d5acbcbb9deae270f4e7209`.
+- Bound outcome/retention candidates to `benchmarks/private/<version>`, selection candidates to
+  `benchmarks/selection/<version>`, and otherwise authorised non-engineering frozen versions to
+  `benchmarks/frozen/<version>`; copied or arbitrary scientific locations now fail validation,
+  approval use, and freeze.
+- Added selection-root version lookup with incompatible-root ambiguity refusal, refused every
+  selection-purpose freeze throughout M2.1, and made PRIVATE post-publication read-back failure
+  quarantine or remove the candidate while preserving the original exception.
+- Paths remain outside logical identities, and all engineering-fixture regression identities remain
+  unchanged.
+- Status: correction remains part of the open M2.1 implementation PR. No merge, tag, release,
+  production benchmark content, M2.2 work, model access, or GPU work has occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

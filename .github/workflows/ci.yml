@@ -62,3 +62,42 @@ jobs:
           test -n "$manifest"
           uv run --frozen unfrozen validate-core --manifest "$manifest"
           uv run --frozen unfrozen replay-core --manifest "$manifest"
+
+      - name: Benchmark lifecycle engineering smoke
+        env:
+          CUDA_VISIBLE_DEVICES: ""
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+        run: |
+          benchmark_tmp="$(mktemp -d)"
+          trap 'rm -rf "$benchmark_tmp"' EXIT
+          candidate="$benchmark_tmp/private"
+          approval="$benchmark_tmp/engineering-approval.json"
+          frozen="$benchmark_tmp/frozen"
+          uv run --frozen unfrozen build-benchmark \
+            --source tests/fixtures/benchmark_lifecycle/source \
+            --output "$candidate" \
+            --version engineering-benchmark-lifecycle-v1 \
+            --purpose engineering
+          uv run --frozen unfrozen validate-benchmark \
+            --manifest "$candidate/candidate_manifest.json"
+          ! grep -E 'correct_option_id|answer_index|expected_answer|gold_label|answer_rationale' \
+            "$candidate/public_manifest.json" "$candidate/coverage_summary.json"
+          uv run --frozen unfrozen create-engineering-freeze-approval \
+            --candidate-manifest "$candidate/candidate_manifest.json" \
+            --output "$approval" \
+            --signer ci-engineering-fixture
+          uv run --frozen unfrozen freeze-benchmark \
+            --candidate-manifest "$candidate/candidate_manifest.json" \
+            --approval "$approval" \
+            --output "$frozen"
+          uv run --frozen unfrozen validate-benchmark \
+            --manifest "$frozen/frozen_manifest.json"
+          if uv run --frozen unfrozen freeze-benchmark \
+            --candidate-manifest "$candidate/candidate_manifest.json" \
+            --approval "$approval" \
+            --output "$frozen"; then
+            echo "Repeated freeze unexpectedly succeeded" >&2
+            exit 1
+          fi
+          uv run --frozen unfrozen audit-benchmark-git

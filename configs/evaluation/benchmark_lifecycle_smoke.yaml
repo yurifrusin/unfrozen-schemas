@@ -1,0 +1,12 @@
+schema_version: "1"
+source_format: canonical-jsonl-v1
+source: tests/fixtures/benchmark_lifecycle/source
+version: engineering-benchmark-lifecycle-v1
+purpose: engineering
+device: cpu
+offline: true
+model_access: false
+gpu_access: false
+engineering_only: true
+scientific_eligible: false
+promotable: false

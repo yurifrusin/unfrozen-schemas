@@ -58,7 +58,14 @@ data/yoked_trajectories/
 data/ledgers/
 data/norms/
 data/replay/
-benchmarks/private/
+benchmarks/source/*
+!benchmarks/source/README.md
+benchmarks/private/*
+!benchmarks/private/README.md
+benchmarks/frozen/*
+!benchmarks/frozen/README.md
+benchmarks/selection/*
+!benchmarks/selection/README.md
 
 # Temporary logs and local scratch space
 *.log

@@ -115,6 +115,60 @@ After the linked documentation closeout is merged and `milestone-1-complete` is 
 from canonical `main`, governance authorises Milestone 2 as the next engineering milestone. That
 authorisation does not begin Milestone 2, and no Milestone 2 work occurred during this closeout.
 
+### 2026-08-25 — Benchmark identity, visibility, answers, and hash domains are separated
+
+M2.1 treats lifecycle state independently from release visibility: SOURCE authoring, PRIVATE
+candidate, and FROZEN write-once status do not imply that prompts, answers, or metadata are public.
+Answers remain in a distinct private artifact, while public output is aggregate metadata scanned
+recursively against private values.
+
+Outcome, selection, engineering, and prospective retention purposes are bound into item identity,
+logical hashes, manifests, and approvals. An item cannot change purpose in place, and cross-purpose
+validation compares both stable IDs and equivalent model-visible content. This keeps model-selection
+material and software fixtures from becoming outcome evidence.
+
+Scientific logical hashes are calculated from typed canonical records with explicit domains and are
+separate from exact file/container hashes. This preserves identity across path, timestamp, JSON-key,
+line-ending, and filesystem-order differences while retaining ordinary artifact hashes for byte-level
+provenance. These are prospective integrity decisions, not benchmark-content or scientific-result
+decisions; all open content, validation, ethics, licensing, stack, and archive questions remain open.
+
+### 2026-08-26 — Quarantine must describe the comparison universe, not an operator action
+
+Pre-merge adversarial review showed that purpose isolation was incomplete when validation depended
+on optional repeated manifest arguments. It also showed that a fingerprint containing authored IDs
+could be evaded without changing the question shown to the evaluated model.
+
+M2.1 therefore treats the complete canonical manifest scan as an immutable candidate input. Exact
+displayed input and order-neutral content receive separate purpose-neutral identities: the first
+preserves option presentation and book eligibility, while the second detects copied content after
+ID replacement or option reversal. A changed comparison universe invalidates the candidate rather
+than relying on an operator to remember which manifests existed.
+
+The same review makes reverse-option variants a controlled transformation rather than a loose
+grouping convention. Pair members may differ only in enumerated presentation/source-record fields;
+prompt, annotations, validation, causal classification, correct stable answer, and substantive
+evidence remain equal. Complete recursive public isolation and exact independent provenance checks
+then protect those private semantics even against coordinated manifest edits. These are prospective
+integrity corrections before benchmark authoring or treatment results, not new benchmark content,
+scientific findings, or changes to the experimental design.
+
+### 2026-08-26 — The quarantine universe requires canonical membership
+
+A complete manifest scan cannot protect a scientific candidate stored outside every scanned root.
+M2.1 therefore treats canonical repository membership as a necessary precondition for quarantine:
+outcome and retention candidates inhabit the private root, selection candidates inhabit their
+separate selection root, and eligible frozen outcome/retention versions inhabit the frozen root.
+Content fingerprints and scope hashes still determine cross-purpose equivalence; location is not
+itself scientific identity and never enters logical hashes.
+
+This closes an evasion path without scanning arbitrary disks or owner directories. Any
+non-engineering artifact capable of approval or freeze must first be a member of the complete
+repository quarantine universe. Selection freeze remains disabled until M2.5 reviews a procedure,
+and atomic PRIVATE publication now fails closed for the same reason as FROZEN publication: a command
+must not report failure while leaving a valid artifact at the requested governed destination. This
+is methodological integrity rationale, not benchmark content or a Phase I result.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>

@@ -54,6 +54,46 @@ The M1 path is CPU-only, offline, and engineering-only. Its exact operational co
 licences, serialization boundaries, and hashing rules are documented in `docs/schemaworld-core.md`.
 Generated runs remain under ignored output storage and are not scientific LLM results.
 
+M2.1 benchmark-lifecycle engineering commands:
+
+```powershell
+uv run unfrozen build-benchmark `
+  --source tests/fixtures/benchmark_lifecycle/source `
+  --output <isolated-private-output> `
+  --version engineering-benchmark-lifecycle-v1 `
+  --purpose engineering
+uv run unfrozen validate-benchmark --manifest <candidate_manifest.json>
+uv run unfrozen create-engineering-freeze-approval `
+  --candidate-manifest <candidate_manifest.json> `
+  --output <engineering-approval.json> `
+  --signer <engineering-reference>
+uv run unfrozen freeze-benchmark `
+  --candidate-manifest <candidate_manifest.json> `
+  --approval <engineering-approval.json> `
+  --output <isolated-frozen-output>
+uv run unfrozen validate-benchmark --manifest <frozen_manifest.json>
+uv run unfrozen audit-benchmark-git
+```
+
+The tracked fixture is non-scientific and non-promotable. M2.1 contains no outcome or selection
+item, does no scoring/model/GPU work, and cannot freeze production `v1_core`. See
+`docs/benchmark-lifecycle.md` and the unfilled `docs/benchmark-card.md` template.
+
+Non-engineering source manifests must declare the complete canonical benchmark quarantine scan;
+the resulting scope is hash-bound through candidates, approvals, operations, and frozen manifests.
+Validation also enforces purpose-neutral exact-display and order-neutral content fingerprints, the
+strict reverse-pair equivalence contract, recursive public-data isolation, exact cross-record
+provenance, repository-root version resolution, and the M2.1 tracked-README allowlist.
+
+Non-engineering candidate storage is exact: outcome and retention use
+`benchmarks/private/<version>`, while selection uses `benchmarks/selection/<version>`. Approved
+outcome/retention frozen versions, where otherwise authorised, use `benchmarks/frozen/<version>`.
+Omitted build output is derived from purpose/version; a supplied output and every directly validated
+manifest must match the canonical path exactly. Version lookup includes the selection root and fails
+on incompatible ambiguity. M2.1 refuses every selection-purpose freeze and continues to refuse
+production `v1_core`. A fatal error after PRIVATE publication quarantines the candidate under an
+unmistakably invalid `invalid-private` sibling or removes it, preserving the original failure.
+
 The unreleased `schemaworld-core-v1` contract fails closed on slack or overlength active
 load-bearing tethers, diagonal movement, swept closed-boundary tunnelling, non-canonical action
 parameters, incomplete pair identities, invalid state-graph references, relation-vocabulary leakage,
