@@ -182,6 +182,31 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Status: correction remains part of the open M2.1 implementation PR. No merge, tag, release,
   production benchmark content, M2.2 work, model access, or GPU work has occurred.
 
+### Milestone 2 M2.1 canonical implementation merge and work-package closeout
+
+- M2.1 began from canonical branch point
+  `73a787b3f0c25b78962ac13fb3b26c1cc50f0dae`, the target of `milestone-1-complete`.
+- Owner approval identified implementation pull request `#5` and exact head
+  `c2f78a8512a2db8c547955b50184c406153cc59d`.
+- Pull request `https://github.com/yurifrusin/unfrozen-schemas/pull/5` was revalidated as open,
+  non-draft, mergeable into `main`, with zero review threads or findings and its required `cpu`
+  check passing in workflow run `32918619766` on the exact approved head.
+- The implementation was merged normally, without squash, rebase, rewrite, or administrator bypass,
+  at `2026-08-26T02:23:18Z`. The canonical implementation merge commit is
+  `90c3428f70e03c3cf31e3e2309a65a2340f41cd1`.
+- Push-triggered canonical-main workflow run `32922535140` passed job `cpu` on that implementation
+  merge commit. Local `main` was then fast-forwarded and verified clean and equal to `origin/main`.
+- Revision 6 `CODEX_SPEC.md` remained unchanged at SHA-256
+  `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`.
+- M2.1 benchmark schema/lifecycle mechanics, the non-scientific engineering fixture, and the
+  pre-merge integrity and canonical-storage corrections are completed and merged. The corrected
+  engineering regression identities remain intact.
+- M2.1 is complete as an engineering work package. Milestone 2 remains in progress: no Milestone 2,
+  benchmark-freeze, or scientific-checkpoint tag or GitHub Release was created, and `v1_core`
+  remains unfrozen.
+- Advancement decision: M2.2 is the next authorised work package, but it was not begun by this
+  closeout. No real benchmark-item authoring, model, tokenizer, training, GPU, or EPS work occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

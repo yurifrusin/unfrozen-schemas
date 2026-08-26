@@ -1,13 +1,13 @@
 # Milestone 2 Release — Benchmark, qualification, and stack freeze
 
-> Draft work-in-progress record. Milestone 2 is not complete, `v1_core` is not frozen, and no tag or
-> release is authorised by M2.1.
+> Draft work-in-progress record. M2.1 is completed and merged, but Milestone 2 is not complete,
+> `v1_core` is not frozen, and no tag or release is authorised by the M2.1 closeout.
 
 ## Identity
 
 - Tag: `<blocked until all M2.1-M2.6 work and canonical closeout>`
 - Commit: `<pending final Milestone 2 canonical merge>`
-- Implementation pull requests: `<M2.1 pending; M2.2-M2.6 pending>`
+- Implementation pull requests: `M2.1: #5 merged; M2.2-M2.6 pending`
 - Final milestone merge: `<pending>`
 - Release date: `<pending>`
 - Release URL: `<pending>`
@@ -16,7 +16,10 @@
 
 ## Work-package status
 
-- **M2.1 — benchmark schema and lifecycle:** work in progress on a dedicated branch. Implements
+- **M2.1 — benchmark schema and lifecycle:** completed and merged through pull request `#5` at
+  approved head `c2f78a8512a2db8c547955b50184c406153cc59d`; canonical implementation merge
+  `90c3428f70e03c3cf31e3e2309a65a2340f41cd1`; final implementation-main workflow run
+  `32922535140`, job `cpu`, passed. Implements
   purpose quarantine, strict item/answer/approval records, distinct hash domains, answer-isolated
   deterministic build, independent validation, governed write-once engineering freeze, tests, and
   documentation. The pre-merge correction makes quarantine a mandatory hash-bound canonical-root
@@ -27,6 +30,8 @@
   frozen manifest to its exact purpose-specific repository location, resolves selection versions
   from their own root, refuses every M2.1 selection freeze, and gives PRIVATE publication the same
   fail-closed post-rename handling as FROZEN publication. It contains no real benchmark item.
+  The engineering fixture is regression evidence for the lifecycle implementation only and is not
+  scientific benchmark evidence. No empirical LLM result is claimed.
 - **M2.2 — literal/counterfactual families:** pending.
 - **M2.3 — abstract/metaphorical families:** pending.
 - **M2.4 — scoring, option order, leakage, retention:** pending.
@@ -45,13 +50,14 @@
 
 ## Verification
 
-- Final M2.1 branch CI: `<pending exact cpu run>`
-- Ruff: `<pending final>`
-- Formatting: `<pending final>`
-- Static typing: `<pending final>`
-- Pytest: `<pending final>`
-- Benchmark lifecycle smoke: `<pending final>`
-- Existing M0/M1 smoke and SchemaWorld generation/replay: `<pending final>`
+- Final M2.1 branch CI: workflow run `32918619766`, job `cpu`, passed on approved head
+  `c2f78a8512a2db8c547955b50184c406153cc59d`.
+- Final implementation-main CI: workflow run `32922535140`, job `cpu`, passed on canonical merge
+  `90c3428f70e03c3cf31e3e2309a65a2340f41cd1`.
+- The successful `cpu` jobs ran Ruff lint and formatting, strict static typing, pytest, offline CPU
+  smoke, SchemaWorld Core generation/replay smoke, and benchmark lifecycle engineering smoke.
+- Revision 6 `CODEX_SPEC.md` SHA-256 remained
+  `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`.
 
 ## Final Milestone 2 artifacts still required
 
@@ -85,7 +91,8 @@ New identities have no obsolete predecessor:
 - Representative order-neutral item-content fingerprint:
   `d432c21c9ce5037cb3e4f4e124d83da37faca14b8c329fcec9f84469059c3a2f`.
 
-These identities are engineering regression data only and are not benchmark evidence.
+These identities are engineering regression data only and are not scientific benchmark evidence.
+They support no empirical claim about LLM behaviour, image-schema acquisition, or transfer.
 
 ## Known limitations and unresolved questions
 
@@ -96,6 +103,8 @@ licensing, model stack, Phase I seeds/thresholds, and durable external archive r
 ## Advancement decision
 
 - Milestone status: `IN PROGRESS`.
-- M2.1 merge, when separately approved, will not complete Milestone 2.
-- Next authorised work after M2.1 closeout: only the separately scoped subsequent Milestone 2 work
-  package; do not begin it in the M2.1 implementation task.
+- M2.1 status: `COMPLETED AND MERGED` as an engineering work package; this does not complete
+  Milestone 2.
+- `v1_core` remains unfrozen. Every Milestone 2 tag, GitHub Release, final benchmark,
+  model-selection, and advancement field remains pending.
+- Next authorised work after M2.1 closeout: M2.2, which was not begun by this closeout.
