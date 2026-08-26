@@ -16,9 +16,9 @@ coverage:
   required_levels: [L1, L2]
   required_task_families:
     - direct-literal-outcome
-    - literal-intervention-consequence
     - matched-counterfactual-reasoning
     - novel-literal-configuration
+    - literal-physical-mechanism-analogy
   minimum_groups_per_schema: 4
   minimum_groups_per_schema_level: 2
 execution:

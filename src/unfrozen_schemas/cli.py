@@ -44,6 +44,7 @@ from unfrozen_schemas.evaluation.literal_models import LiteralOperationError
 from unfrozen_schemas.evaluation.literal_review import (
     build_literal_review,
     inspect_literal_item,
+    materialize_literal_candidate,
     validate_literal_benchmark,
     validate_literal_review,
 )
@@ -677,6 +678,71 @@ def validate_literal_source_command(
     )
 
 
+@app.command("materialize-literal-candidate")
+def materialize_literal_candidate_command(
+    version: Annotated[
+        str | None,
+        typer.Option("--version", help="Canonical outcome candidate version."),
+    ] = None,
+    source: Annotated[
+        Path | None,
+        typer.Option(
+            "--source",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            help="Engineering source override.",
+        ),
+    ] = None,
+    candidate_manifest: Annotated[
+        Path | None,
+        typer.Option(
+            "--candidate-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="Engineering M2.1 candidate-manifest override.",
+        ),
+    ] = None,
+) -> None:
+    """Atomically materialize M2.2 records beside a validated M2.1 candidate."""
+
+    try:
+        repository = find_repository_root(Path.cwd())
+        if version is not None:
+            if source is not None or candidate_manifest is not None:
+                raise ValueError("--version cannot be combined with explicit engineering paths")
+            safe_version = validate_benchmark_version(version)
+            selected_source = repository / "benchmarks" / "source" / safe_version
+            selected_candidate = (
+                resolve_candidate_version_path(repository, safe_version, BenchmarkPurpose.OUTCOME)
+                / "candidate_manifest.json"
+            )
+        else:
+            if source is None or candidate_manifest is None:
+                raise ValueError("Provide --version or both --source and --candidate-manifest")
+            selected_source = source
+            selected_candidate = candidate_manifest
+        composite = materialize_literal_candidate(
+            source_root=selected_source,
+            candidate_manifest_path=selected_candidate,
+            repository_root=repository,
+        )
+    except Exception as exc:
+        typer.echo(
+            f"Literal candidate materialization failed: {type(exc).__name__}: {exc}", err=True
+        )
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        "Literal candidate materialized: "
+        f"version={composite.candidate_version}; purpose={composite.purpose}; "
+        f"groups={composite.semantic_group_count}; items={composite.source_item_count}; "
+        f"root={composite.literal_candidate_root_sha256}"
+    )
+
+
 @app.command("validate-literal-benchmark")
 def validate_literal_benchmark_command(
     version: Annotated[
@@ -706,7 +772,7 @@ def validate_literal_benchmark_command(
         ),
     ] = None,
 ) -> None:
-    """Bind a validated M2.1 candidate into the M2.2 composite identity."""
+    """Read-only validation of an already materialized M2.2 composite."""
 
     try:
         repository = find_repository_root(Path.cwd())

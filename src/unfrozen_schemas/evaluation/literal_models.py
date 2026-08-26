@@ -14,17 +14,19 @@ from unfrozen_schemas.envs.schema_world.actions import Action
 from unfrozen_schemas.envs.schema_world.dynamics import TransitionTrace
 from unfrozen_schemas.envs.schema_world.relations import RelationRecord
 from unfrozen_schemas.envs.schema_world.state import BoundarySide, WorldState
-from unfrozen_schemas.evaluation.benchmark_models import (
-    HumanValidationMetadata,
-    ProvenanceRights,
-)
+from unfrozen_schemas.evaluation.benchmark_models import HumanValidationMetadata, ProvenanceRights
 from unfrozen_schemas.provenance import ArtifactRecord, GitState, PlatformInformation
 
 SHA256_PATTERN = r"^[a-f0-9]{64}$"
 SLUG_PATTERN = r"^[a-z0-9][a-z0-9._-]*$"
+DISPLAY_NAME_PATTERN = r"^[A-Za-z][A-Za-z '-]{0,39}$"
 LITERAL_CANDIDATE_VERSION = "m2-2-literal-candidate-v1"
 LITERAL_GENERATOR_VERSION = "literal-generator-v1"
 LITERAL_PARTITION_PLAN_VERSION = "literal-partition-plan-v1"
+LITERAL_OUTCOME_TEXT_REGISTRY_VERSION = "literal-outcome-text-registry-v1"
+LITERAL_STRUCTURAL_SIGNATURE_VERSION = "literal-structural-signatures-v1"
+LITERAL_INTERVENTION_CONTRACT_VERSION = "literal-intervention-contract-v1"
+LITERAL_CAUSAL_ALLOWLIST_VERSION = "literal-causal-term-allowlist-v1"
 
 
 class LiteralSchema(StrEnum):
@@ -70,17 +72,89 @@ class SupportScenarioCase(StrEnum):
     NONBEARING_TETHER = "nonbearing-tether"
 
 
+LiteralScenarioCase = ContainmentScenarioCase | SupportScenarioCase
+
+
 class LiteralDirection(StrEnum):
     ENTRY = "entry"
     EXIT = "exit"
+
+
+class LiteralOutcomeCode(StrEnum):
+    MOVEMENT_SUCCEEDS = "movement-succeeds"
+    MOVEMENT_BLOCKED = "movement-blocked"
+    OBJECT_FALLS = "object-falls"
+    OBJECT_STAYS = "object-stays"
+
+
+class LiteralInterventionKind(StrEnum):
+    OPENING_ENABLED_STATE = "opening-enabled-state"
+    OPENING_SPAN = "opening-span"
+    OPENING_ALIGNMENT = "opening-alignment"
+    BOUNDARY_CLOSURE = "boundary-closure"
+    LOWER_SUPPORT_ACTION = "lower-support-action"
+    SUPPORT_CONTACT_GEOMETRY = "support-contact-geometry"
+    TETHER_CUT_ACTION = "tether-cut-action"
+    TETHER_ACTION_CHOICE = "tether-action-choice"
+    TETHER_LOAD_BEARING = "tether-load-bearing"
+
+
+class LiteralCausalFactor(StrEnum):
+    APERTURE_AVAILABILITY = "aperture-availability"
+    APERTURE_SIZE = "aperture-size"
+    APERTURE_ALIGNMENT = "aperture-alignment"
+    PERIMETER_CLOSURE = "perimeter-closure"
+    LOWER_CONTACT_REMOVAL = "lower-contact-removal"
+    LOWER_CONTACT_GEOMETRY = "lower-contact-geometry"
+    TETHER_CONTINUITY = "tether-continuity"
+    LOAD_BEARING_MECHANISM = "load-bearing-mechanism"
+    TETHER_LOAD_BEARING = "tether-load-bearing"
+
+
+class LiteralMechanismKind(StrEnum):
+    FITTING_APERTURE = "fitting-aperture"
+    DISABLED_APERTURE = "disabled-aperture"
+    UNDERSIZED_APERTURE = "undersized-aperture"
+    MISALIGNED_APERTURE = "misaligned-aperture"
+    OPEN_PERIMETER = "open-perimeter"
+    CLOSED_PERIMETER = "closed-perimeter"
+    LOWER_CONTACT = "lower-contact"
+    SIDE_CONTACT = "side-contact"
+    LOAD_BEARING_TETHER = "load-bearing-tether"
+    NONBEARING_TETHER = "nonbearing-tether"
+
+
+class StructuralNoveltyDimension(StrEnum):
+    WORLD_TOPOLOGY = "world-topology"
+    QUALITATIVE_GEOMETRY = "qualitative-geometry"
+    ACTION_PLAN = "action-plan"
+    COUNTERFACTUAL_INTERVENTION = "counterfactual-intervention"
+    SOURCE_MECHANISM = "source-mechanism"
+    PROMPT_TEMPLATE = "prompt-template"
+    OBSERVATION_STRUCTURE = "observation-structure"
+
+
+class LiteralAuditStatus(StrEnum):
+    PASS = "PASS"
+    OWNER_REVIEW_REQUIRED = "OWNER_REVIEW_REQUIRED"
+    FAIL = "FAIL"
 
 
 class LiteralTemplate(FrozenModel):
     template_id: str = Field(pattern=SLUG_PATTERN)
     task_family: LiteralTaskFamily
     transfer_level: LiteralTransferLevel
-    prompt_format: str = Field(min_length=1)
-    instructions: str = Field(min_length=1)
+    renderer_version: Literal["literal-typed-narrative-renderer-v1"] = (
+        "literal-typed-narrative-renderer-v1"
+    )
+    instruction_kind: Literal["choose-one-literal-outcome"] = "choose-one-literal-outcome"
+    vocabulary_mode: Literal["literal_physics", "engineering_fixture"] = "literal_physics"
+
+
+class LiteralOutcomeText(FrozenModel):
+    text_id: str = Field(pattern=SLUG_PATTERN)
+    outcome_code: LiteralOutcomeCode
+    text: str = Field(min_length=1)
 
 
 class LiteralScenarioSpec(FrozenModel):
@@ -89,23 +163,19 @@ class LiteralScenarioSpec(FrozenModel):
     transfer_level: LiteralTransferLevel
     task_family: LiteralTaskFamily
     partition: LiteralPartition
-    source_mechanism_family: str = Field(pattern=SLUG_PATTERN)
     prompt_template_id: str = Field(pattern=SLUG_PATTERN)
-    scenario_case: ContainmentScenarioCase | SupportScenarioCase
+    scenario_case: LiteralScenarioCase
     side: BoundarySide | None = None
     direction: LiteralDirection | None = None
+    intervention_kind: LiteralInterventionKind
     seed: int = Field(ge=0, le=4_294_967_295)
     noise_seed: int = Field(ge=0, le=4_294_967_295)
     include_distractor: bool = False
-    scene_description: str = Field(min_length=1)
-    actual_action_description: str = Field(min_length=1)
-    counterfactual_action_description: str = Field(min_length=1)
-    positive_option_text: str = Field(min_length=1)
-    negative_option_text: str = Field(min_length=1)
-    action_word: str = Field(min_length=1, pattern=r"^[a-z][a-z-]*$")
-    declared_causal_factor: str = Field(min_length=1)
-    declared_non_target_equality_fields: tuple[str, ...] = Field(min_length=1)
-    structural_novelty_dimensions: tuple[str, ...]
+    scene_name: str = Field(pattern=DISPLAY_NAME_PATTERN)
+    outcome_text_record_ids: tuple[str, str]
+    structural_novelty_dimensions: tuple[StructuralNoveltyDimension, ...]
+    matched_stratum_id: str | None = Field(default=None, pattern=SLUG_PATTERN)
+    analogy_reference_group_id: str | None = Field(default=None, pattern=SLUG_PATTERN)
     lexical_cue_annotations: tuple[str, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -123,30 +193,66 @@ class LiteralScenarioSpec(FrozenModel):
         if self.transfer_level is LiteralTransferLevel.L1:
             if self.partition is not LiteralPartition.L1_HELD_OUT:
                 raise ValueError("L1 literal groups must use the held-out literal partition")
+            if self.structural_novelty_dimensions:
+                raise ValueError("L1 groups cannot claim L2 structural novelty")
         elif self.partition is LiteralPartition.L1_HELD_OUT:
             raise ValueError("L2 literal groups cannot use the L1 partition")
         if self.transfer_level is LiteralTransferLevel.L2:
             if not self.structural_novelty_dimensions:
-                raise ValueError("L2 groups require structural novelty beyond a new seed")
-            if set(self.structural_novelty_dimensions) <= {"entity-name-only", "new-seed-only"}:
-                raise ValueError("A new name or seed alone cannot establish L2 transfer")
+                raise ValueError("L2 groups require typed structural novelty evidence")
+            if self.partition is LiteralPartition.L2_NOVEL_TEMPLATE and set(
+                self.structural_novelty_dimensions
+            ) != {StructuralNoveltyDimension.PROMPT_TEMPLATE}:
+                raise ValueError("Novel-template L2 groups must use prompt-template novelty")
+            if self.partition is LiteralPartition.L2_NOVEL_CONFIGURATION and not set(
+                self.structural_novelty_dimensions
+            ) & {
+                StructuralNoveltyDimension.WORLD_TOPOLOGY,
+                StructuralNoveltyDimension.QUALITATIVE_GEOMETRY,
+                StructuralNoveltyDimension.OBSERVATION_STRUCTURE,
+            }:
+                raise ValueError("Novel-configuration L2 groups require structural geometry")
+            if self.partition is LiteralPartition.L2_MECHANISM_TRANSFER and (
+                StructuralNoveltyDimension.SOURCE_MECHANISM
+                not in self.structural_novelty_dimensions
+            ):
+                raise ValueError("Mechanism-transfer L2 groups require source-mechanism novelty")
+            expected_family = {
+                LiteralPartition.L2_NOVEL_TEMPLATE: LiteralTaskFamily.NOVEL_TEMPLATE,
+                LiteralPartition.L2_NOVEL_CONFIGURATION: LiteralTaskFamily.NOVEL_CONFIGURATION,
+                LiteralPartition.L2_MECHANISM_TRANSFER: LiteralTaskFamily.PHYSICAL_ANALOGY,
+            }[self.partition]
+            if self.task_family is not expected_family:
+                raise ValueError("Each L2 partition requires its matching scientific task family")
+        if len(self.outcome_text_record_ids) != len(set(self.outcome_text_record_ids)):
+            raise ValueError("Scenario outcome-text records must be distinct")
+        if len(self.structural_novelty_dimensions) != len(set(self.structural_novelty_dimensions)):
+            raise ValueError("Structural novelty dimensions must be unique")
         if len(self.lexical_cue_annotations) != len(set(self.lexical_cue_annotations)):
             raise ValueError("Lexical-cue annotations must be unique")
+        if (self.task_family is LiteralTaskFamily.PHYSICAL_ANALOGY) != (
+            self.analogy_reference_group_id is not None
+        ):
+            raise ValueError("Only physical-analogy groups require one L1 reference group")
         return self
 
 
 class LiteralAuthoringManifest(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     authoring_kind: Literal["private_literal_authoring"] = "private_literal_authoring"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     purpose: Literal["outcome", "engineering"]
     environment_version: Literal["schemaworld-core-v1"] = "schemaworld-core-v1"
     generator_version: Literal["literal-generator-v1"] = "literal-generator-v1"
     partition_plan_version: Literal["literal-partition-plan-v1"] = "literal-partition-plan-v1"
+    outcome_text_registry_version: Literal["literal-outcome-text-registry-v1"] = (
+        "literal-outcome-text-registry-v1"
+    )
     engineering_only: bool
     scientific_eligible: bool
     promotable: bool
     templates: tuple[LiteralTemplate, ...] = Field(min_length=1)
+    outcome_text_registry: tuple[LiteralOutcomeText, ...] = Field(min_length=4)
     scenarios: tuple[LiteralScenarioSpec, ...] = Field(min_length=1)
     prospective_adaptation_strata: tuple[str, ...] = Field(min_length=1)
 
@@ -159,11 +265,28 @@ class LiteralAuthoringManifest(FrozenModel):
             raise ValueError("Outcome authoring cannot be marked engineering-only")
         template_ids = tuple(item.template_id for item in self.templates)
         group_ids = tuple(item.semantic_group_id for item in self.scenarios)
+        text_ids = tuple(item.text_id for item in self.outcome_text_registry)
         if len(template_ids) != len(set(template_ids)):
             raise ValueError("Literal prompt-template IDs must be unique")
         if len(group_ids) != len(set(group_ids)):
             raise ValueError("Literal semantic-group IDs must be unique")
+        if len(text_ids) != len(set(text_ids)):
+            raise ValueError("Literal outcome-text IDs must be unique")
+        normalised_texts: set[str] = set()
+        for record in self.outcome_text_registry:
+            text = " ".join(record.text.split()).casefold()
+            if text in normalised_texts:
+                raise ValueError("Literal outcome wording records must have unique text")
+            normalised_texts.add(text)
+        if set(record.outcome_code for record in self.outcome_text_registry) != set(
+            LiteralOutcomeCode
+        ):
+            raise ValueError("Outcome-text registry must cover all four literal outcomes")
         template_by_id = {item.template_id: item for item in self.templates}
+        text_by_id = {item.text_id: item for item in self.outcome_text_registry}
+        scene_names: set[str] = set()
+        referenced_template_ids: set[str] = set()
+        referenced_text_ids: set[str] = set()
         for scenario in self.scenarios:
             template = template_by_id.get(scenario.prompt_template_id)
             if template is None:
@@ -175,11 +298,103 @@ class LiteralAuthoringManifest(FrozenModel):
                 or template.transfer_level is not scenario.transfer_level
             ):
                 raise ValueError("Scenario and prompt-template classifications must agree")
+            referenced_template_ids.add(scenario.prompt_template_id)
+            referenced_text_ids.update(scenario.outcome_text_record_ids)
+            try:
+                selected = tuple(text_by_id[item] for item in scenario.outcome_text_record_ids)
+            except KeyError as exc:
+                raise ValueError("Scenario references an unknown outcome-text record") from exc
+            expected_codes = (
+                {LiteralOutcomeCode.MOVEMENT_SUCCEEDS, LiteralOutcomeCode.MOVEMENT_BLOCKED}
+                if scenario.schema_identity is LiteralSchema.CONTAINMENT
+                else {LiteralOutcomeCode.OBJECT_FALLS, LiteralOutcomeCode.OBJECT_STAYS}
+            )
+            if {item.outcome_code for item in selected} != expected_codes:
+                raise ValueError("Scenario outcome wording does not cover its two typed outcomes")
+            scene_key = " ".join(scenario.scene_name.split()).casefold()
+            if scene_key in scene_names:
+                raise ValueError("Cosmetic scene names must be unique")
+            scene_names.add(scene_key)
+            if scenario.analogy_reference_group_id is not None:
+                reference = next(
+                    (
+                        item
+                        for item in self.scenarios
+                        if item.semantic_group_id == scenario.analogy_reference_group_id
+                    ),
+                    None,
+                )
+                if (
+                    reference is None
+                    or reference.transfer_level is not LiteralTransferLevel.L1
+                    or reference.schema_identity is not scenario.schema_identity
+                ):
+                    raise ValueError(
+                        "Physical analogy must reference an L1 group of the same schema"
+                    )
+        if referenced_template_ids != set(template_ids):
+            raise ValueError("Literal authoring cannot retain orphaned prompt templates")
+        if referenced_text_ids != set(text_ids):
+            raise ValueError("Literal authoring cannot retain orphaned outcome-text records")
         return self
 
 
-class LiteralPartitionPlan(FrozenModel):
+class LiteralStructuralSignatures(FrozenModel):
     schema_version: Literal["1"] = "1"
+    signature_version: Literal["literal-structural-signatures-v1"] = (
+        "literal-structural-signatures-v1"
+    )
+    world_topology_sha256: str = Field(pattern=SHA256_PATTERN)
+    qualitative_geometry_sha256: str = Field(pattern=SHA256_PATTERN)
+    action_plan_sha256: str = Field(pattern=SHA256_PATTERN)
+    counterfactual_intervention_sha256: str = Field(pattern=SHA256_PATTERN)
+    source_mechanism_sha256: str = Field(pattern=SHA256_PATTERN)
+    prompt_template_sha256: str = Field(pattern=SHA256_PATTERN)
+    observation_structure_sha256: str = Field(pattern=SHA256_PATTERN)
+    configuration_sha256: str = Field(pattern=SHA256_PATTERN)
+    witness_configuration_sha256: str = Field(pattern=SHA256_PATTERN)
+
+
+class LiteralInterventionContract(FrozenModel):
+    schema_version: Literal["1"] = "1"
+    contract_version: Literal["literal-intervention-contract-v1"] = (
+        "literal-intervention-contract-v1"
+    )
+    scenario_case: LiteralScenarioCase
+    intervention_kind: LiteralInterventionKind
+    occurs_in: Literal["initial_state", "action"]
+    allowed_initial_difference_paths: tuple[str, ...]
+    allowed_action_difference_paths: tuple[str, ...]
+    required_equal_scopes: tuple[str, ...]
+    allowed_horizon: Literal[1] = 1
+    causal_factor: LiteralCausalFactor
+    expected_actual_outcome: LiteralOutcomeCode
+    expected_counterfactual_outcome: LiteralOutcomeCode
+
+
+class LiteralNarrativeFacts(FrozenModel):
+    schema_version: Literal["1"] = "1"
+    facts_kind: Literal["literal_narrative_facts"] = "literal_narrative_facts"
+    scene_name: str = Field(pattern=DISPLAY_NAME_PATTERN)
+    schema_identity: LiteralSchema
+    transfer_level: LiteralTransferLevel
+    task_family: LiteralTaskFamily
+    scenario_case: LiteralScenarioCase
+    side: BoundarySide | None
+    direction: LiteralDirection | None
+    intervention_kind: LiteralInterventionKind
+    source_mechanism: LiteralMechanismKind
+    actual_scene_clause: str = Field(min_length=1)
+    counterfactual_scene_clause: str = Field(min_length=1)
+    actual_action_summary: str = Field(min_length=1)
+    counterfactual_action_summary: str = Field(min_length=1)
+    mechanism_summary: str = Field(min_length=1)
+    task_family_question: str = Field(min_length=1)
+    instructions: str = Field(min_length=1)
+
+
+class LiteralPartitionPlan(FrozenModel):
+    schema_version: Literal["2"] = "2"
     plan_kind: Literal["literal_partition_plan"] = "literal_partition_plan"
     plan_version: Literal["literal-partition-plan-v1"] = "literal-partition-plan-v1"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
@@ -190,6 +405,14 @@ class LiteralPartitionPlan(FrozenModel):
     l2_mechanism_transfer_group_ids: tuple[str, ...]
     benchmark_reserved_prompt_template_ids: tuple[str, ...]
     benchmark_reserved_semantic_group_ids: tuple[str, ...]
+    reserved_world_topology_signatures: tuple[str, ...]
+    reserved_qualitative_geometry_signatures: tuple[str, ...]
+    reserved_action_signatures: tuple[str, ...]
+    reserved_counterfactual_signatures: tuple[str, ...]
+    reserved_source_mechanism_signatures: tuple[str, ...]
+    reserved_observation_structure_signatures: tuple[str, ...]
+    reserved_configuration_signatures: tuple[str, ...]
+    reserved_witness_configuration_signatures: tuple[str, ...]
     future_treatment_overlap_status: Literal["not_assessed_m2_2"] = "not_assessed_m2_2"
     partition_plan_sha256: str = Field(pattern=SHA256_PATTERN)
 
@@ -221,6 +444,14 @@ class LiteralPartitionPlan(FrozenModel):
             "l2_mechanism_transfer_group_ids",
             "benchmark_reserved_prompt_template_ids",
             "benchmark_reserved_semantic_group_ids",
+            "reserved_world_topology_signatures",
+            "reserved_qualitative_geometry_signatures",
+            "reserved_action_signatures",
+            "reserved_counterfactual_signatures",
+            "reserved_source_mechanism_signatures",
+            "reserved_observation_structure_signatures",
+            "reserved_configuration_signatures",
+            "reserved_witness_configuration_signatures",
         ):
             values = getattr(self, field_name)
             if tuple(sorted(values)) != values or len(values) != len(set(values)):
@@ -241,15 +472,20 @@ class LiteralTemplateRegistryManifest(FrozenModel):
 
 
 class LiteralWitnessRecord(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     semantic_group_id: str = Field(pattern=SLUG_PATTERN)
     item_ids: tuple[str, str]
     schema_identity: LiteralSchema
     transfer_level: LiteralTransferLevel
     task_family: LiteralTaskFamily
-    source_mechanism_family: str = Field(pattern=SLUG_PATTERN)
+    source_mechanism: LiteralMechanismKind
     prompt_template_id: str = Field(pattern=SLUG_PATTERN)
     partition: LiteralPartition
+    scenario_case: LiteralScenarioCase
+    intervention_kind: LiteralInterventionKind
+    structural_novelty_dimensions: tuple[StructuralNoveltyDimension, ...]
+    matched_stratum_id: str | None
+    analogy_reference_group_id: str | None
     environment_version: Literal["schemaworld-core-v1"] = "schemaworld-core-v1"
     generator_version: Literal["literal-generator-v1"] = "literal-generator-v1"
     seed: int
@@ -272,13 +508,14 @@ class LiteralWitnessRecord(FrozenModel):
     counterfactual_transition_hashes: tuple[str, ...]
     actual_relations: tuple[RelationRecord, ...]
     counterfactual_relations: tuple[RelationRecord, ...]
-    declared_causal_factor: str
-    declared_non_target_equality_fields: tuple[str, ...]
-    declared_initial_difference_paths: tuple[str, ...]
-    declared_action_difference_paths: tuple[str, ...]
-    actual_outcome_code: str = Field(pattern=SLUG_PATTERN)
-    counterfactual_outcome_code: str = Field(pattern=SLUG_PATTERN)
+    intervention_contract: LiteralInterventionContract
+    observed_initial_difference_paths: tuple[str, ...]
+    observed_action_difference_paths: tuple[str, ...]
+    actual_outcome_code: LiteralOutcomeCode
+    counterfactual_outcome_code: LiteralOutcomeCode
     stable_correct_option_id: str = Field(pattern=SLUG_PATTERN)
+    structural_signatures: LiteralStructuralSignatures
+    narrative_facts: LiteralNarrativeFacts
     witness_sha256: str = Field(pattern=SHA256_PATTERN)
 
     @model_validator(mode="after")
@@ -301,21 +538,26 @@ class LiteralWitnessBundle(FrozenModel):
 
 
 class LiteralItemBinding(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     semantic_group_id: str = Field(pattern=SLUG_PATTERN)
     item_ids: tuple[str, str]
     variant_ids: tuple[str, str]
     option_permutations: tuple[tuple[str, ...], tuple[str, ...]]
+    outcome_text_record_ids: tuple[str, str]
     schema_identity: LiteralSchema
     transfer_level: LiteralTransferLevel
     task_family: LiteralTaskFamily
-    source_mechanism_family: str = Field(pattern=SLUG_PATTERN)
+    source_mechanism: LiteralMechanismKind
     prompt_template_id: str = Field(pattern=SLUG_PATTERN)
     partition: LiteralPartition
-    scenario_case: str = Field(pattern=SLUG_PATTERN)
+    scenario_case: LiteralScenarioCase
+    intervention_kind: LiteralInterventionKind
     action_word: str = Field(pattern=r"^[a-z][a-z-]*$")
     counterfactual_group_id: str = Field(pattern=SLUG_PATTERN)
-    structural_novelty_dimensions: tuple[str, ...]
+    structural_novelty_dimensions: tuple[StructuralNoveltyDimension, ...]
+    structural_signatures: LiteralStructuralSignatures
+    matched_stratum_id: str | None
+    analogy_reference_group_id: str | None
     stable_correct_option_id: str = Field(pattern=SLUG_PATTERN)
     witness_sha256: str = Field(pattern=SHA256_PATTERN)
     reversal_transformation: Literal["reversed option presentation"] = (
@@ -336,38 +578,49 @@ class LiteralLexicalFinding(FrozenModel):
     finding_kind: str = Field(pattern=SLUG_PATTERN)
     scope: str = Field(min_length=1)
     value: str = Field(min_length=1)
-    disposition: Literal["pass", "reviewed-causal", "fail"]
+    disposition: LiteralAuditStatus
 
 
 class LiteralLexicalAudit(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     audit_kind: Literal["literal_lexical_cue_audit"] = "literal_lexical_cue_audit"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
+    causal_term_allowlist_version: Literal["literal-causal-term-allowlist-v1"] = (
+        "literal-causal-term-allowlist-v1"
+    )
+    causal_term_allowlist: tuple[str, ...]
     semantic_group_count: int
     source_item_count: int
     answer_position_counts: dict[str, int]
     template_answer_counts: dict[str, dict[str, int]]
     action_word_answer_counts: dict[str, dict[str, int]]
     source_mechanism_answer_counts: dict[str, dict[str, int]]
+    prompt_length_by_answer_class: dict[str, dict[str, int]]
+    option_length_by_answer_class: dict[str, dict[str, int]]
+    option_style_by_answer_class: dict[str, dict[str, int]]
     exact_duplicate_group_count: int
     near_duplicate_group_pairs: tuple[tuple[str, str], ...]
     findings: tuple[LiteralLexicalFinding, ...]
+    unresolved_owner_review_finding_count: int
     external_language_overlap_status: Literal["not_assessed_m2_2"] = "not_assessed_m2_2"
-    status: Literal["PASS"] = "PASS"
+    status: LiteralAuditStatus
     lexical_audit_sha256: str = Field(pattern=SHA256_PATTERN)
 
 
 class LiteralSplitAudit(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     audit_kind: Literal["literal_split_audit"] = "literal_split_audit"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     semantic_group_count: int
     l1_group_count: int
     l2_group_count: int
     unique_state_hash_count: int
+    unique_observation_hash_count: int
     unique_action_hash_count: int
+    unique_group_count: int
     unique_witness_hash_count: int
-    l2_structural_novelty_dimensions: dict[str, tuple[str, ...]]
+    l2_structural_novelty_dimensions: dict[str, tuple[StructuralNoveltyDimension, ...]]
+    structural_signature_strata: dict[str, tuple[str, ...]]
     exact_prompt_duplicate_count: int
     future_treatment_overlap_status: Literal["not_assessed_m2_2"] = "not_assessed_m2_2"
     status: Literal["PASS"] = "PASS"
@@ -375,7 +628,7 @@ class LiteralSplitAudit(FrozenModel):
 
 
 class LiteralValidationReport(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     report_kind: Literal["literal_validation_report"] = "literal_validation_report"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     purpose: Literal["outcome", "engineering"]
@@ -386,10 +639,12 @@ class LiteralValidationReport(FrozenModel):
     family_counts: dict[str, int]
     mechanism_counts: dict[str, int]
     simulator_correctness: Literal["PASS"] = "PASS"
+    typed_narrative_integrity: Literal["PASS"] = "PASS"
     counterfactual_parity: Literal["PASS"] = "PASS"
+    cross_record_consistency: Literal["PASS"] = "PASS"
     split_integrity: Literal["PASS"] = "PASS"
     reverse_equivalence: Literal["PASS"] = "PASS"
-    lexical_cue_audit: Literal["PASS"] = "PASS"
+    lexical_cue_audit: Literal["PASS", "OWNER_REVIEW_REQUIRED"]
     prompt_option_balance: Literal["PASS"] = "PASS"
     provenance_integrity: Literal["PASS"] = "PASS"
     m2_1_lifecycle_validation: Literal["PASS", "not_evaluated_source_stage"]
@@ -405,11 +660,17 @@ class LiteralValidationReport(FrozenModel):
 
 
 class LiteralSourceBundleManifest(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     manifest_kind: Literal["literal_source_bundle"] = "literal_source_bundle"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     purpose: Literal["outcome", "engineering"]
-    authoring_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
+    git: GitState
+    codex_spec_sha256: str = Field(pattern=SHA256_PATTERN)
+    resolved_configuration: dict[str, Any]
+    tracked_configuration_file_sha256: str = Field(pattern=SHA256_PATTERN)
+    authoring_input_file_sha256: str = Field(pattern=SHA256_PATTERN)
+    authoring_snapshot_sha256: str = Field(pattern=SHA256_PATTERN)
+    authoring_snapshot_file_sha256: str = Field(pattern=SHA256_PATTERN)
     m2_1_source_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
     m2_1_items_file_sha256: str = Field(pattern=SHA256_PATTERN)
     partition_plan_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -419,18 +680,21 @@ class LiteralSourceBundleManifest(FrozenModel):
     split_audit_sha256: str = Field(pattern=SHA256_PATTERN)
     lexical_audit_sha256: str = Field(pattern=SHA256_PATTERN)
     literal_validation_report_sha256: str = Field(pattern=SHA256_PATTERN)
-    generation_operation_sha256: str = Field(pattern=SHA256_PATTERN)
+    source_generation_operation_sha256: str = Field(pattern=SHA256_PATTERN)
     artifacts: tuple[ArtifactRecord, ...]
     literal_source_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
 
 
 class LiteralCandidateManifest(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     manifest_kind: Literal["literal_private_candidate"] = "literal_private_candidate"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     purpose: Literal["outcome", "engineering"]
     git: GitState
     codex_spec_sha256: str = Field(pattern=SHA256_PATTERN)
+    authoring_snapshot_sha256: str = Field(pattern=SHA256_PATTERN)
+    authoring_snapshot_file_sha256: str = Field(pattern=SHA256_PATTERN)
+    source_generation_operation_sha256: str = Field(pattern=SHA256_PATTERN)
     m2_1_candidate_manifest_file_sha256: str = Field(pattern=SHA256_PATTERN)
     m2_1_candidate_bundle_root_sha256: str = Field(pattern=SHA256_PATTERN)
     m2_1_source_snapshot_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -452,79 +716,134 @@ class LiteralCandidateManifest(FrozenModel):
 
 
 class LiteralReviewItem(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     semantic_group_id: str = Field(pattern=SLUG_PATTERN)
     item_ids: tuple[str, str]
     schema_identity: LiteralSchema
     transfer_level: LiteralTransferLevel
+    partition: LiteralPartition
     task_family: LiteralTaskFamily
+    scenario_case: LiteralScenarioCase
+    source_mechanism: LiteralMechanismKind
+    structural_novelty_dimensions: tuple[StructuralNoveltyDimension, ...]
+    structural_signatures: LiteralStructuralSignatures
     prompt: str
+    instructions: str
     option_forms: tuple[tuple[dict[str, str], ...], tuple[dict[str, str], ...]]
     stable_correct_option_id: str
+    typed_actual_action_summary: str
+    typed_counterfactual_action_summary: str
+    actual_outcome_code: LiteralOutcomeCode
+    counterfactual_outcome_code: LiteralOutcomeCode
+    allowed_initial_difference_paths: tuple[str, ...]
+    observed_initial_difference_paths: tuple[str, ...]
+    allowed_action_difference_paths: tuple[str, ...]
+    observed_action_difference_paths: tuple[str, ...]
+    declared_equal_fields: tuple[str, ...]
     simulator_rationale: str
-    actual_outcome_code: str
-    counterfactual_outcome_code: str
-    causal_factor: str
+    cue_findings: tuple[LiteralLexicalFinding, ...]
     lexical_cue_annotations: tuple[str, ...]
     provenance: ProvenanceRights
     human_validation: HumanValidationMetadata
-    human_validation_status: Literal["not_started", "not_applicable_engineering"] = "not_started"
-    before_render_path: str
-    after_render_path: str
+    governance_status: Literal["owner_review_pending", "engineering_only"]
+    render_paths: tuple[str, str, str, str]
+    authoring_snapshot_sha256: str = Field(pattern=SHA256_PATTERN)
+    literal_candidate_root_sha256: str = Field(pattern=SHA256_PATTERN)
+    witness_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
+    literal_validation_report_sha256: str = Field(pattern=SHA256_PATTERN)
     witness_sha256: str = Field(pattern=SHA256_PATTERN)
     item_binding_sha256: str = Field(pattern=SHA256_PATTERN)
 
 
-class LiteralPendingOwnerReview(FrozenModel):
+class LiteralCueDispositionRecord(FrozenModel):
     schema_version: Literal["1"] = "1"
+    record_kind: Literal["literal_cue_owner_disposition"] = "literal_cue_owner_disposition"
+    candidate_version: str = Field(pattern=SLUG_PATTERN)
+    lexical_audit_sha256: str = Field(pattern=SHA256_PATTERN)
+    candidate_root_sha256: str = Field(pattern=SHA256_PATTERN)
+    status: Literal["PENDING"] = "PENDING"
+    required_finding_indexes: tuple[int, ...]
+    accepted_finding_indexes: tuple[int, ...] = ()
+    rejected_finding_indexes: tuple[int, ...] = ()
+    near_duplicate_disposition_required: bool
+    owner_decision_recorded: Literal[False] = False
+
+
+class LiteralPendingOwnerReview(FrozenModel):
+    schema_version: Literal["2"] = "2"
     record_kind: Literal["literal_pending_owner_review"] = "literal_pending_owner_review"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     status: Literal["PENDING"] = "PENDING"
     owner_decision_recorded: Literal[False] = False
     substitutes_for_human_validation: Literal[False] = False
-    required_owner_bindings: tuple[
-        Literal[
-            "pull_request_number",
-            "pull_request_head_sha",
-            "m2_1_candidate_manifest_file_sha256",
-            "m2_1_candidate_bundle_root_sha256",
-            "literal_candidate_root_sha256",
-            "m2_1_source_snapshot_sha256",
-            "witness_bundle_sha256",
-            "literal_validation_report_sha256",
-            "review_manifest_sha256",
-        ],
-        ...,
-    ]
+    required_owner_bindings: tuple[str, ...]
 
     @model_validator(mode="after")
     def validate_binding_set(self) -> LiteralPendingOwnerReview:
+        expected = {
+            "authoring_snapshot_file_sha256",
+            "authoring_snapshot_sha256",
+            "candidate_materialization_operation_sha256",
+            "literal_candidate_root_sha256",
+            "literal_validation_report_sha256",
+            "m2_1_candidate_bundle_root_sha256",
+            "m2_1_candidate_manifest_file_sha256",
+            "m2_1_source_snapshot_sha256",
+            "pull_request_head_sha",
+            "pull_request_number",
+            "review_manifest_file_sha256",
+            "review_manifest_sha256",
+            "review_operation_sha256",
+            "source_generation_operation_sha256",
+            "witness_bundle_sha256",
+        }
+        if set(self.required_owner_bindings) != expected:
+            raise ValueError("Pending owner-review binding set is incomplete or unexpected")
         if tuple(sorted(self.required_owner_bindings)) != self.required_owner_bindings:
             raise ValueError("Pending owner-review bindings must use sorted ordering")
-        if len(self.required_owner_bindings) != len(set(self.required_owner_bindings)):
-            raise ValueError("Pending owner-review bindings must be unique")
         return self
 
 
+class LiteralRenderRecord(FrozenModel):
+    path: str = Field(min_length=1)
+    width: Literal[128] = 128
+    height: Literal[128] = 128
+    mode: Literal["RGB"] = "RGB"
+    raw_pixel_sha256: str = Field(pattern=SHA256_PATTERN)
+    scientific_render_sha256: str = Field(pattern=SHA256_PATTERN)
+
+
 class LiteralReviewManifest(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     manifest_kind: Literal["literal_private_review_bundle"] = "literal_private_review_bundle"
     candidate_version: str = Field(pattern=SLUG_PATTERN)
+    git: GitState
+    codex_spec_sha256: str = Field(pattern=SHA256_PATTERN)
+    authoring_snapshot_sha256: str = Field(pattern=SHA256_PATTERN)
+    authoring_snapshot_file_sha256: str = Field(pattern=SHA256_PATTERN)
+    source_generation_operation_sha256: str = Field(pattern=SHA256_PATTERN)
+    candidate_materialization_operation_sha256: str = Field(pattern=SHA256_PATTERN)
+    review_operation_sha256: str = Field(pattern=SHA256_PATTERN)
     literal_candidate_root_sha256: str = Field(pattern=SHA256_PATTERN)
     witness_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
     literal_validation_report_sha256: str = Field(pattern=SHA256_PATTERN)
     review_content_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
-    render_pixel_hashes: dict[str, str]
+    render_records: tuple[LiteralRenderRecord, ...]
     artifacts: tuple[ArtifactRecord, ...]
     review_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
 
 
 class LiteralOperationRecord(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     record_kind: Literal["literal_operation"] = "literal_operation"
     operation_id: str
     operation_kind: Literal[
-        "generate_literal_source", "validate_literal_source", "build_literal_review"
+        "generate_literal_source",
+        "validate_literal_source",
+        "materialize_literal_candidate",
+        "validate_literal_benchmark",
+        "build_literal_review",
+        "validate_literal_review",
     ]
     candidate_version: str = Field(pattern=SLUG_PATTERN)
     purpose: Literal["outcome", "engineering"]

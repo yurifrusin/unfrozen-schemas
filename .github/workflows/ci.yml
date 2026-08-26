@@ -124,6 +124,9 @@ jobs:
             --purpose engineering
           uv run --frozen unfrozen validate-benchmark \
             --manifest "$candidate/candidate_manifest.json"
+          uv run --frozen unfrozen materialize-literal-candidate \
+            --source "$source" \
+            --candidate-manifest "$candidate/candidate_manifest.json"
           uv run --frozen unfrozen validate-literal-benchmark \
             --source "$source" \
             --candidate-manifest "$candidate/candidate_manifest.json"

@@ -92,6 +92,9 @@ uv run unfrozen build-benchmark `
   --output <isolated-candidate-output> `
   --version engineering-literal-fixture-v1 `
   --purpose engineering
+uv run unfrozen materialize-literal-candidate `
+  --source <isolated-source-output> `
+  --candidate-manifest <isolated-candidate-output>/candidate_manifest.json
 uv run unfrozen validate-literal-benchmark `
   --source <isolated-source-output> `
   --candidate-manifest <isolated-candidate-output>/candidate_manifest.json

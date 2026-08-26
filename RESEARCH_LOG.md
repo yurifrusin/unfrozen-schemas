@@ -201,6 +201,31 @@ its portable logical root from deterministic raw RGB pixel hashes plus all non-r
 artifacts. This preserves both byte-level review provenance and the prior scientific rule that an
 inspection container cannot define state identity.
 
+### 2026-08-26 — Literal semantics must reconstruct across independent record boundaries
+
+Pre-merge adversarial review showed that a replayable simulator witness is insufficient when the
+model-visible narrative, option meaning, novelty claim, or declared counterfactual contract can be
+coordinated through independent free-form records. Hash consistency alone proves that records were
+stored consistently; it does not prove that their meanings agree.
+
+M2.2 therefore retains the exact typed authoring snapshot and reconstructs every source group from
+closed scenario, intervention, outcome-text, renderer, and Core replay contracts. The stable answer
+must denote the actual simulator outcome through the explicit outcome registry. Every allowed
+counterfactual difference is defined before observing the generated pair, and every field outside
+that contract must remain equal. Structural novelty uses seed-, noise-, ID-, wording-, and
+filesystem-independent signatures, while exact L1/L2 state, observation, action, group, and witness
+identities remain disjoint.
+
+Lexical flags are epistemic states rather than retrospective labels: perfect associations and near
+duplicates remain `OWNER_REVIEW_REQUIRED` until a separate candidate-bound owner disposition exists.
+Likewise, materialisation is a write operation and validation is observation only. Operational Git,
+specification, configuration, environment, budget, and artifact identities remain exact even where
+portable scientific roots deliberately exclude timestamps, paths, platforms, or PNG containers.
+
+These corrections strengthen prospective semantic and review integrity before owner review or
+treatment visibility. They do not validate naturalness, rights, ethics, human interpretation,
+construct validity, model learning, transfer, or any Phase I gate criterion.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>

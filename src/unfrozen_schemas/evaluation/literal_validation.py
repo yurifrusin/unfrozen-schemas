@@ -26,7 +26,15 @@ from unfrozen_schemas.evaluation.benchmark_validation import (
     load_source_directory,
     validate_reverse_pairs,
 )
+from unfrozen_schemas.evaluation.literal_contracts import (
+    intervention_contract,
+    narrative_facts,
+    render_literal_prompt,
+    source_mechanism,
+    structural_signatures,
+)
 from unfrozen_schemas.evaluation.literal_hashing import (
+    authoring_snapshot_hash,
     item_binding_bundle_hash,
     item_binding_hash,
     lexical_audit_hash,
@@ -41,15 +49,20 @@ from unfrozen_schemas.evaluation.literal_hashing import (
     witness_hash,
 )
 from unfrozen_schemas.evaluation.literal_models import (
+    LiteralAuditStatus,
+    LiteralAuthoringManifest,
     LiteralItemBinding,
     LiteralItemBindingBundle,
     LiteralLexicalAudit,
     LiteralLexicalFinding,
     LiteralOperationRecord,
+    LiteralPartition,
     LiteralPartitionPlan,
     LiteralPendingOwnerReview,
+    LiteralScenarioSpec,
     LiteralSourceBundleManifest,
     LiteralSplitAudit,
+    LiteralTaskFamily,
     LiteralTemplate,
     LiteralTemplateRegistryManifest,
     LiteralTransferLevel,
@@ -59,6 +72,7 @@ from unfrozen_schemas.evaluation.literal_models import (
 )
 
 LITERAL_DIRECTORY = ".literal"
+AUTHORING_SNAPSHOT_FILE = "authoring_snapshot.json"
 PARTITION_PLAN_FILE = "partition_plan.json"
 TEMPLATE_REGISTRY_FILE = "template_registry.json"
 ITEM_BINDINGS_FILE = "item_bindings.json"
@@ -70,7 +84,7 @@ SOURCE_BUNDLE_FILE = "literal_source_bundle.json"
 GENERATION_OPERATION_FILE = "generation_operation_record.json"
 COMPOSITE_CANDIDATE_FILE = "literal_candidate_manifest.json"
 CANDIDATE_VALIDATION_REPORT_FILE = "candidate_literal_validation_report.json"
-CANDIDATE_VALIDATION_OPERATION_FILE = "candidate_validation_operation_record.json"
+CANDIDATE_MATERIALIZATION_OPERATION_FILE = "candidate_materialization_operation_record.json"
 REVIEW_OPERATION_FILE = "review_operation_record.json"
 
 _RAW_VISIBLE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -93,11 +107,26 @@ _RAW_VISIBLE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
+_CAUSAL_TERM_ALLOWLIST: tuple[str, ...] = (
+    "aligned",
+    "anchor",
+    "closed",
+    "container",
+    "cut",
+    "falls",
+    "inside",
+    "opening",
+    "outside",
+    "platform",
+    "tether",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class LoadedLiteralSource:
     root: Path
     source_manifest: SourceManifest
+    authoring_snapshot: LiteralAuthoringManifest
     items: tuple[SourceItemRecord, ...]
     partition_plan: LiteralPartitionPlan
     template_registry: LiteralTemplateRegistryManifest
@@ -156,12 +185,43 @@ def build_lexical_audit(
     answer_position_counts: Counter[str] = Counter()
     prompt_by_group: dict[str, str] = {}
     token_outcomes: dict[tuple[str, str], set[str]] = defaultdict(set)
+    prompt_lengths: dict[str, list[int]] = defaultdict(list)
+    option_lengths_by_class: dict[str, list[int]] = defaultdict(list)
+    option_styles: dict[str, Counter[str]] = defaultdict(Counter)
+
+    def style(value: str) -> str:
+        stripped = value.strip()
+        modality = next(
+            (
+                item
+                for item in ("may", "might", "must", "will", "would", "could", "should")
+                if re.search(rf"\b{item}\b", stripped, flags=re.IGNORECASE)
+            ),
+            "none",
+        )
+        terminal = stripped[-1] if stripped[-1] in ".!?" else "none"
+        return (
+            f"capitalised-{stripped[:1].isupper()}|terminal-{terminal}|"
+            f"modality-{modality}|sentences-{len(re.findall(r'[.!?]', stripped))}"
+        )
+
+    def summary(values: Sequence[int]) -> dict[str, int]:
+        return {
+            "count": len(values),
+            "minimum": min(values),
+            "maximum": max(values),
+            "total": sum(values),
+        }
+
     for binding in bindings:
         left = item_by_id[binding.item_ids[0]]
         right = item_by_id[binding.item_ids[1]]
         if left.model_visible.prompt != right.model_visible.prompt:
             raise ValueError(f"Reverse group {binding.semantic_group_id} changes its prompt")
         prompt_by_group[binding.semantic_group_id] = _normalise_text(left.model_visible.prompt)
+        prompt_lengths[binding.stable_correct_option_id].append(
+            len(_tokens(left.model_visible.prompt))
+        )
         for item in (left, right):
             permutation = item.model_visible.option_permutation
             answer_position_counts[
@@ -180,7 +240,7 @@ def build_lexical_audit(
                             finding_kind=kind,
                             scope=item.item_id,
                             value=match.group(0),
-                            disposition="fail",
+                            disposition=LiteralAuditStatus.FAIL,
                         )
                     )
             normalised_prompt = _normalise_text(item.model_visible.prompt)
@@ -193,21 +253,34 @@ def build_lexical_audit(
                         finding_kind="prompt-states-option-consequence",
                         scope=item.item_id,
                         value="option text appears in prompt",
-                        disposition="fail",
+                        disposition=LiteralAuditStatus.FAIL,
                     )
                 )
-            option_lengths = [
+            pair_lengths = [
                 len(_tokens(option.text)) for option in item.model_visible.ordered_options
             ]
-            if max(option_lengths) - min(option_lengths) > 4:
+            if max(pair_lengths) - min(pair_lengths) > 4:
                 findings.append(
                     LiteralLexicalFinding(
                         finding_kind="option-length-imbalance",
                         scope=item.item_id,
-                        value=str(option_lengths),
-                        disposition="fail",
+                        value=str(pair_lengths),
+                        disposition=LiteralAuditStatus.FAIL,
                     )
                 )
+            observed_styles = {style(option.text) for option in item.model_visible.ordered_options}
+            if len(observed_styles) != 1:
+                findings.append(
+                    LiteralLexicalFinding(
+                        finding_kind="option-style-imbalance",
+                        scope=item.item_id,
+                        value="grammaticality-specificity-or-modality-style-differs",
+                        disposition=LiteralAuditStatus.FAIL,
+                    )
+                )
+        for option in left.model_visible.ordered_options:
+            option_lengths_by_class[option.option_id].append(len(_tokens(option.text)))
+            option_styles[option.option_id][style(option.text)] += 1
         prompt_tokens = _tokens(left.model_visible.prompt)
         ngrams = set(prompt_tokens)
         ngrams.update(f"{first} {second}" for first, second in pairwise(prompt_tokens))
@@ -238,13 +311,13 @@ def build_lexical_audit(
                     finding_kind="perfect-family-token-association",
                     scope=family,
                     value=token,
-                    disposition="reviewed-causal",
+                    disposition=LiteralAuditStatus.OWNER_REVIEW_REQUIRED,
                 )
             )
 
     template_counts = _answer_counts(bindings, "prompt_template_id")
     action_counts = _answer_counts(bindings, "action_word")
-    mechanism_counts = _answer_counts(bindings, "source_mechanism_family")
+    mechanism_counts = _answer_counts(bindings, "source_mechanism")
     for label, groups in (
         ("template", template_counts),
         ("action-word", action_counts),
@@ -257,35 +330,63 @@ def build_lexical_audit(
                         finding_kind=f"{label}-single-answer-class",
                         scope=group,
                         value=next(iter(counts)),
-                        disposition="fail",
+                        disposition=LiteralAuditStatus.OWNER_REVIEW_REQUIRED,
                     )
                 )
+    for left_id, right_id in near_pairs:
+        findings.append(
+            LiteralLexicalFinding(
+                finding_kind="near-prompt-duplicate",
+                scope="semantic-groups",
+                value=f"{left_id}|{right_id}",
+                disposition=LiteralAuditStatus.OWNER_REVIEW_REQUIRED,
+            )
+        )
     if duplicate_groups:
         findings.append(
             LiteralLexicalFinding(
                 finding_kind="exact-prompt-duplicate",
                 scope="semantic-groups",
                 value=str(len(duplicate_groups)),
-                disposition="fail",
+                disposition=LiteralAuditStatus.FAIL,
             )
         )
-    failures = [finding for finding in findings if finding.disposition == "fail"]
+    failures = [finding for finding in findings if finding.disposition is LiteralAuditStatus.FAIL]
     if failures:
         first = failures[0]
         raise ValueError(
             f"Literal lexical audit failed: {first.finding_kind} at {first.scope}: {first.value}"
         )
+    owner_findings = [
+        finding
+        for finding in findings
+        if finding.disposition is LiteralAuditStatus.OWNER_REVIEW_REQUIRED
+    ]
     provisional = LiteralLexicalAudit(
         candidate_version=candidate_version,
+        causal_term_allowlist=_CAUSAL_TERM_ALLOWLIST,
         semantic_group_count=len(bindings),
         source_item_count=len(items),
         answer_position_counts=dict(sorted(answer_position_counts.items())),
         template_answer_counts=template_counts,
         action_word_answer_counts=action_counts,
         source_mechanism_answer_counts=mechanism_counts,
+        prompt_length_by_answer_class={
+            key: summary(value) for key, value in sorted(prompt_lengths.items())
+        },
+        option_length_by_answer_class={
+            key: summary(value) for key, value in sorted(option_lengths_by_class.items())
+        },
+        option_style_by_answer_class={
+            key: dict(sorted(value.items())) for key, value in sorted(option_styles.items())
+        },
         exact_duplicate_group_count=len(duplicate_groups),
         near_duplicate_group_pairs=tuple(near_pairs),
         findings=tuple(findings),
+        unresolved_owner_review_finding_count=len(owner_findings),
+        status=(
+            LiteralAuditStatus.OWNER_REVIEW_REQUIRED if owner_findings else LiteralAuditStatus.PASS
+        ),
         lexical_audit_sha256="0" * 64,
     )
     return provisional.model_copy(update={"lexical_audit_sha256": lexical_audit_hash(provisional)})
@@ -298,13 +399,110 @@ def build_split_audit(
     bindings: Sequence[LiteralItemBinding],
     witnesses: Sequence[LiteralWitnessRecord],
 ) -> LiteralSplitAudit:
-    prompt_counts = Counter(_normalise_text(item.model_visible.prompt) for item in items[::2])
+    item_by_id = {item.item_id: item for item in items}
+    prompt_counts = Counter(
+        _normalise_text(item_by_id[binding.item_ids[0]].model_visible.prompt)
+        for binding in bindings
+    )
     duplicates = sum(count - 1 for count in prompt_counts.values() if count > 1)
+    if duplicates:
+        raise ValueError("Literal split contains exact prompt duplicates")
     l2_dimensions = {
         binding.semantic_group_id: binding.structural_novelty_dimensions
         for binding in bindings
         if binding.transfer_level is LiteralTransferLevel.L2
     }
+    if len({item.semantic_group_id for item in bindings}) != len(bindings):
+        raise ValueError("Literal split reuses a semantic-group identity")
+    witness_by_group = {item.semantic_group_id: item for item in witnesses}
+    if len(witness_by_group) != len(witnesses):
+        raise ValueError("Literal split reuses a witness semantic-group identity")
+    binding_by_group = {item.semantic_group_id: item for item in bindings}
+    l1 = [item for item in bindings if item.transfer_level is LiteralTransferLevel.L1]
+    l2 = [item for item in bindings if item.transfer_level is LiteralTransferLevel.L2]
+    l1_witnesses = [witness_by_group[item.semantic_group_id] for item in l1]
+    l2_witnesses = [witness_by_group[item.semantic_group_id] for item in l2]
+
+    def exact_hashes(records: Sequence[LiteralWitnessRecord], first: str, second: str) -> set[str]:
+        return {
+            value
+            for record in records
+            for value in (getattr(record, first), getattr(record, second))
+        }
+
+    exact_partitions = {
+        "state": (
+            exact_hashes(l1_witnesses, "initial_state_hash", "counterfactual_initial_state_hash"),
+            exact_hashes(l2_witnesses, "initial_state_hash", "counterfactual_initial_state_hash"),
+        ),
+        "observation": (
+            exact_hashes(
+                l1_witnesses,
+                "initial_observation_hash",
+                "counterfactual_initial_observation_hash",
+            ),
+            exact_hashes(
+                l2_witnesses,
+                "initial_observation_hash",
+                "counterfactual_initial_observation_hash",
+            ),
+        ),
+        "action": (
+            exact_hashes(
+                l1_witnesses, "action_sequence_hash", "counterfactual_action_sequence_hash"
+            ),
+            exact_hashes(
+                l2_witnesses, "action_sequence_hash", "counterfactual_action_sequence_hash"
+            ),
+        ),
+        "group": (
+            {item.semantic_group_id for item in l1},
+            {item.semantic_group_id for item in l2},
+        ),
+        "witness": (
+            {item.witness_sha256 for item in l1_witnesses},
+            {item.witness_sha256 for item in l2_witnesses},
+        ),
+    }
+    for label, (l1_hashes, l2_hashes) in exact_partitions.items():
+        if l1_hashes & l2_hashes:
+            raise ValueError(f"L1/L2 exact {label} identities are not disjoint")
+    l1_templates = {item.prompt_template_id for item in l1}
+    l1_configurations = {item.structural_signatures.configuration_sha256 for item in l1}
+    for binding in l2:
+        if binding.partition is LiteralPartition.L2_NOVEL_TEMPLATE:
+            if binding.prompt_template_id in l1_templates:
+                raise ValueError("Novel-template L2 template was not withheld from L1")
+        elif (
+            binding.partition is LiteralPartition.L2_NOVEL_CONFIGURATION
+            and binding.structural_signatures.configuration_sha256 in l1_configurations
+        ):
+            raise ValueError("Novel-configuration L2 signature is present in L1")
+        if binding.task_family is LiteralTaskFamily.PHYSICAL_ANALOGY:
+            assert binding.analogy_reference_group_id is not None
+            reference = binding_by_group.get(binding.analogy_reference_group_id)
+            if reference is None or reference.transfer_level is not LiteralTransferLevel.L1:
+                raise ValueError("Physical analogy lacks its declared L1 reference")
+            if (
+                reference.structural_signatures.source_mechanism_sha256
+                == binding.structural_signatures.source_mechanism_sha256
+            ):
+                raise ValueError(
+                    "Physical analogy changes only its label, not its mechanism mapping"
+                )
+
+    signature_groups: dict[str, list[LiteralItemBinding]] = defaultdict(list)
+    for binding in bindings:
+        signature_groups[binding.structural_signatures.configuration_sha256].append(binding)
+    for signature, members in signature_groups.items():
+        if len(members) == 1:
+            continue
+        strata = {item.matched_stratum_id for item in members}
+        if len(strata) != 1 or None in strata:
+            raise ValueError(
+                f"Repeated structural signature {signature} lacks one declared matched stratum"
+            )
+
     provisional = LiteralSplitAudit(
         candidate_version=candidate_version,
         semantic_group_count=len(bindings),
@@ -314,10 +512,30 @@ def build_split_audit(
         l2_group_count=sum(
             binding.transfer_level is LiteralTransferLevel.L2 for binding in bindings
         ),
-        unique_state_hash_count=len({item.initial_state_hash for item in witnesses}),
-        unique_action_hash_count=len({item.action_sequence_hash for item in witnesses}),
+        unique_state_hash_count=len(
+            exact_hashes(witnesses, "initial_state_hash", "counterfactual_initial_state_hash")
+        ),
+        unique_observation_hash_count=len(
+            exact_hashes(
+                witnesses,
+                "initial_observation_hash",
+                "counterfactual_initial_observation_hash",
+            )
+        ),
+        unique_action_hash_count=len(
+            exact_hashes(
+                witnesses,
+                "action_sequence_hash",
+                "counterfactual_action_sequence_hash",
+            )
+        ),
+        unique_group_count=len(binding_by_group),
         unique_witness_hash_count=len({item.witness_sha256 for item in witnesses}),
         l2_structural_novelty_dimensions=dict(sorted(l2_dimensions.items())),
+        structural_signature_strata={
+            signature: tuple(sorted(item.semantic_group_id for item in members))
+            for signature, members in sorted(signature_groups.items())
+        },
         exact_prompt_duplicate_count=duplicates,
         split_audit_sha256="0" * 64,
     )
@@ -371,7 +589,11 @@ def _replay_witness(witness: LiteralWitnessRecord) -> None:
             raise ValueError(f"{prefix} relation mismatch for {witness.semantic_group_id}")
 
 
-def verify_witness(witness: LiteralWitnessRecord) -> None:
+def verify_witness(
+    witness: LiteralWitnessRecord,
+    spec: LiteralScenarioSpec,
+    template: LiteralTemplate,
+) -> None:
     """Reconstruct all stored witness claims without trusting stored answers."""
 
     from unfrozen_schemas.evaluation.literal_scenarios import (
@@ -409,35 +631,26 @@ def verify_witness(witness: LiteralWitnessRecord) -> None:
         witness.counterfactual_initial_privileged_state,
     )
     action_differences = difference_paths(witness.actual_actions, witness.counterfactual_actions)
-    if initial_differences != witness.declared_initial_difference_paths:
+    contract = intervention_contract(spec.scenario_case)
+    if witness.intervention_contract != contract:
+        raise ValueError(f"Intervention contract mismatch: {witness.semantic_group_id}")
+    if spec.intervention_kind is not contract.intervention_kind:
+        raise ValueError(f"Declared intervention kind mismatch: {witness.semantic_group_id}")
+    if initial_differences != witness.observed_initial_difference_paths:
         raise ValueError(f"Undeclared initial-state difference: {witness.semantic_group_id}")
-    if action_differences != witness.declared_action_difference_paths:
+    if action_differences != witness.observed_action_difference_paths:
         raise ValueError(f"Undeclared action difference: {witness.semantic_group_id}")
-    if bool(initial_differences) == bool(action_differences):
+    if initial_differences != contract.allowed_initial_difference_paths:
         raise ValueError(
-            f"Counterfactual must change exactly one state-or-action dimension: "
+            "Initial-state differences exceed the prospective contract: "
             f"{witness.semantic_group_id}"
         )
-    for field in witness.declared_non_target_equality_fields:
-        if field == "initial_state":
-            equal = (
-                witness.initial_privileged_state == witness.counterfactual_initial_privileged_state
-            )
-        elif field == "transition_horizon":
-            equal = len(witness.actual_actions) == len(witness.counterfactual_actions)
-        elif hasattr(witness.initial_privileged_state, field):
-            equal = getattr(witness.initial_privileged_state, field) == getattr(
-                witness.counterfactual_initial_privileged_state, field
-            )
-        else:
-            raise ValueError(
-                f"Unknown counterfactual parity declaration {field!r}: {witness.semantic_group_id}"
-            )
-        if not equal:
-            raise ValueError(
-                f"Counterfactual parity declaration is false for {field!r}: "
-                f"{witness.semantic_group_id}"
-            )
+    if action_differences != contract.allowed_action_difference_paths:
+        raise ValueError(
+            f"Action differences exceed the prospective contract: {witness.semantic_group_id}"
+        )
+    if len(witness.actual_actions) != contract.allowed_horizon:
+        raise ValueError(f"Witness exceeds the prospective horizon: {witness.semantic_group_id}")
     _replay_witness(witness)
     actual = derive_outcome_code(
         witness.schema_identity,
@@ -458,6 +671,62 @@ def verify_witness(witness: LiteralWitnessRecord) -> None:
         raise ValueError(f"Counterfactual outcome is unchanged: {witness.semantic_group_id}")
     if correct_option_id_for_outcome(actual) != witness.stable_correct_option_id:
         raise ValueError(f"Correct-option derivation mismatch: {witness.semantic_group_id}")
+    if (
+        actual is not contract.expected_actual_outcome
+        or counterfactual is not contract.expected_counterfactual_outcome
+    ):
+        raise ValueError(f"Prospective outcome contract mismatch: {witness.semantic_group_id}")
+    expected_facts = narrative_facts(
+        spec,
+        witness.initial_privileged_state,
+        witness.counterfactual_initial_privileged_state,
+        witness.actual_actions,
+        witness.counterfactual_actions,
+    )
+    if witness.narrative_facts != expected_facts:
+        raise ValueError(f"Typed narrative facts do not reconstruct: {witness.semantic_group_id}")
+    expected_signatures = structural_signatures(
+        spec,
+        template,
+        witness.initial_privileged_state,
+        witness.counterfactual_initial_privileged_state,
+        witness.actual_actions,
+        witness.counterfactual_actions,
+        actual,
+        counterfactual,
+    )
+    if witness.structural_signatures != expected_signatures:
+        raise ValueError(f"Structural signatures do not reconstruct: {witness.semantic_group_id}")
+    expected_metadata = (
+        spec.semantic_group_id,
+        spec.schema_identity,
+        spec.transfer_level,
+        spec.task_family,
+        source_mechanism(spec.scenario_case),
+        spec.prompt_template_id,
+        spec.partition,
+        spec.scenario_case,
+        spec.intervention_kind,
+        spec.structural_novelty_dimensions,
+        spec.matched_stratum_id,
+        spec.analogy_reference_group_id,
+    )
+    observed_metadata = (
+        witness.semantic_group_id,
+        witness.schema_identity,
+        witness.transfer_level,
+        witness.task_family,
+        witness.source_mechanism,
+        witness.prompt_template_id,
+        witness.partition,
+        witness.scenario_case,
+        witness.intervention_kind,
+        witness.structural_novelty_dimensions,
+        witness.matched_stratum_id,
+        witness.analogy_reference_group_id,
+    )
+    if observed_metadata != expected_metadata:
+        raise ValueError(f"Witness authoring metadata mismatch: {witness.semantic_group_id}")
     if witness_hash(witness) != witness.witness_sha256:
         raise ValueError(f"Witness logical hash mismatch: {witness.semantic_group_id}")
 
@@ -478,6 +747,9 @@ def load_literal_source(source_root: Path) -> LoadedLiteralSource:
     return LoadedLiteralSource(
         root=root,
         source_manifest=source_manifest,
+        authoring_snapshot=read_canonical_model(
+            _literal_path(root, AUTHORING_SNAPSHOT_FILE), LiteralAuthoringManifest
+        ),
         items=items,
         partition_plan=read_canonical_model(
             _literal_path(root, PARTITION_PLAN_FILE), LiteralPartitionPlan
@@ -516,19 +788,29 @@ def _verify_template_registry(
 
 def validate_loaded_literal_source(
     loaded: LoadedLiteralSource,
-    *,
-    templates: Sequence[LiteralTemplate] | None = None,
 ) -> LiteralValidationReport:
+    """Reconstruct the complete source from its retained authoring snapshot."""
+
     manifest = loaded.source_manifest
     version = manifest.benchmark_version
     purpose = manifest.purpose.value
     if version != loaded.partition_plan.candidate_version:
         raise ValueError("M2.1 and M2.2 source versions differ")
-    load_source_directory(loaded.root, benchmark_version=version, purpose=manifest.purpose)
+    if loaded.authoring_snapshot.candidate_version != version:
+        raise ValueError("Retained authoring snapshot has the wrong candidate version")
+    _source_manifest, source_snapshot = load_source_directory(
+        loaded.root, benchmark_version=version, purpose=manifest.purpose
+    )
+    if source_snapshot.items != loaded.items:
+        raise ValueError("M2.1 source snapshot and M2.2 source items differ")
     validate_reverse_pairs(loaded.items)
     bindings = loaded.item_bindings.bindings
     witnesses = loaded.witness_bundle.witnesses
-    if len(loaded.items) != 2 * len(bindings) or len(bindings) != len(witnesses):
+    scenarios = loaded.authoring_snapshot.scenarios
+    templates = loaded.authoring_snapshot.templates
+    if not (
+        len(loaded.items) == 2 * len(bindings) and len(bindings) == len(witnesses) == len(scenarios)
+    ):
         raise ValueError("Literal source requires exactly two items and one witness per group")
     if tuple(sorted(binding.semantic_group_id for binding in bindings)) != tuple(
         binding.semantic_group_id for binding in bindings
@@ -538,21 +820,110 @@ def validate_loaded_literal_source(
         witness.semantic_group_id for witness in witnesses
     ):
         raise ValueError("Literal witnesses are not canonically ordered")
+    expected_groups = tuple(sorted(item.semantic_group_id for item in scenarios))
+    observed_binding_groups = tuple(item.semantic_group_id for item in bindings)
+    observed_witness_groups = tuple(item.semantic_group_id for item in witnesses)
+    if observed_binding_groups != expected_groups or observed_witness_groups != expected_groups:
+        raise ValueError("Authoring, binding, and witness semantic-group sets differ")
+    partition_groups = tuple(
+        sorted(
+            (
+                *loaded.partition_plan.l1_held_out_group_ids,
+                *loaded.partition_plan.l2_novel_template_group_ids,
+                *loaded.partition_plan.l2_novel_configuration_group_ids,
+                *loaded.partition_plan.l2_mechanism_transfer_group_ids,
+            )
+        )
+    )
+    if partition_groups != expected_groups:
+        raise ValueError("Partition plan does not contain the complete authoring group set")
     witness_by_group = {item.semantic_group_id: item for item in witnesses}
+    scenario_by_group = {item.semantic_group_id: item for item in scenarios}
+    template_by_id = {item.template_id: item for item in templates}
+    outcome_text_by_id = {
+        item.text_id: item for item in loaded.authoring_snapshot.outcome_text_registry
+    }
     items_by_id = {item.item_id: item for item in loaded.items}
+    all_bound_item_ids: list[str] = []
     for binding in bindings:
         if item_binding_hash(binding) != binding.item_binding_sha256:
             raise ValueError(f"Item-binding hash mismatch: {binding.semantic_group_id}")
         witness = witness_by_group.get(binding.semantic_group_id)
         if witness is None or witness.witness_sha256 != binding.witness_sha256:
             raise ValueError(f"Item binding has no matching witness: {binding.semantic_group_id}")
-        verify_witness(witness)
-        if (
-            binding.item_ids != witness.item_ids
-            or binding.stable_correct_option_id != witness.stable_correct_option_id
-        ):
+        spec = scenario_by_group[binding.semantic_group_id]
+        template = template_by_id[spec.prompt_template_id]
+        verify_witness(witness, spec, template)
+        expected_binding_fields = (
+            witness.item_ids,
+            spec.outcome_text_record_ids,
+            spec.schema_identity,
+            spec.transfer_level,
+            spec.task_family,
+            witness.source_mechanism,
+            spec.prompt_template_id,
+            spec.partition,
+            spec.scenario_case,
+            spec.intervention_kind,
+            witness.actual_actions[0].kind.value.casefold().replace("_", "-"),
+            spec.structural_novelty_dimensions,
+            witness.structural_signatures,
+            spec.matched_stratum_id,
+            spec.analogy_reference_group_id,
+            witness.stable_correct_option_id,
+        )
+        observed_binding_fields = (
+            binding.item_ids,
+            binding.outcome_text_record_ids,
+            binding.schema_identity,
+            binding.transfer_level,
+            binding.task_family,
+            binding.source_mechanism,
+            binding.prompt_template_id,
+            binding.partition,
+            binding.scenario_case,
+            binding.intervention_kind,
+            binding.action_word,
+            binding.structural_novelty_dimensions,
+            binding.structural_signatures,
+            binding.matched_stratum_id,
+            binding.analogy_reference_group_id,
+            binding.stable_correct_option_id,
+        )
+        if observed_binding_fields != expected_binding_fields:
             raise ValueError(f"Witness and item binding disagree: {binding.semantic_group_id}")
+        all_bound_item_ids.extend(binding.item_ids)
         pair = tuple(items_by_id[item_id] for item_id in binding.item_ids)
+        expected_prompt = render_literal_prompt(template, witness.narrative_facts)
+        expected_options = {
+            outcome_text_by_id[text_id].outcome_code.value: outcome_text_by_id[text_id].text
+            for text_id in spec.outcome_text_record_ids
+        }
+        for index, item in enumerate(pair):
+            expected_order = binding.option_permutations[index]
+            if (
+                item.task_family_slug != binding.task_family.value
+                or item.transfer_level
+                != (1 if binding.transfer_level is LiteralTransferLevel.L1 else 2)
+                or item.source_mechanism_family != binding.source_mechanism.value
+                or item.prompt_template_id != binding.prompt_template_id
+                or item.partition_id != binding.partition.value
+                or item.model_visible.prompt != expected_prompt
+                or item.model_visible.instructions != witness.narrative_facts.instructions
+                or item.model_visible.variant_id != binding.variant_ids[index]
+                or item.model_visible.option_permutation != expected_order
+                or tuple(option.option_id for option in item.model_visible.ordered_options)
+                != expected_order
+                or {option.option_id: option.text for option in item.model_visible.ordered_options}
+                != {option_id: expected_options[option_id] for option_id in expected_order}
+                or item.scientific_annotations.required_causal_factors
+                != (witness.intervention_contract.causal_factor.value,)
+                or item.scientific_annotations.source_mechanism_family
+                != binding.source_mechanism.value
+            ):
+                raise ValueError(
+                    f"Typed narrative/source item mismatch: {binding.semantic_group_id}"
+                )
         if any(
             item.private_answer.correct_option_id != binding.stable_correct_option_id
             for item in pair
@@ -573,6 +944,28 @@ def validate_loaded_literal_source(
             reversed(left.model_visible.option_permutation)
         ):
             raise ValueError(f"Reverse option order mismatch: {binding.semantic_group_id}")
+        correct_text_record = next(
+            (
+                outcome_text_by_id[text_id]
+                for text_id in spec.outcome_text_record_ids
+                if outcome_text_by_id[text_id].outcome_code.value
+                == witness.stable_correct_option_id
+            ),
+            None,
+        )
+        if (
+            correct_text_record is None
+            or correct_text_record.outcome_code is not witness.actual_outcome_code
+        ):
+            raise ValueError(
+                "Stable correct option does not express simulator outcome: "
+                f"{binding.semantic_group_id}"
+            )
+
+    if len(all_bound_item_ids) != len(set(all_bound_item_ids)) or set(all_bound_item_ids) != set(
+        items_by_id
+    ):
+        raise ValueError("Literal source has an orphaned or reused source item")
 
     if partition_plan_hash(loaded.partition_plan) != loaded.partition_plan.partition_plan_sha256:
         raise ValueError("Literal partition-plan hash does not reconstruct")
@@ -583,13 +976,11 @@ def validate_loaded_literal_source(
         raise ValueError("Literal item-binding bundle hash does not reconstruct")
     if witness_bundle_hash(loaded.witness_bundle) != loaded.witness_bundle.witness_bundle_sha256:
         raise ValueError("Literal witness-bundle hash does not reconstruct")
-    if templates is not None:
-        _verify_template_registry(loaded.template_registry, templates)
-    elif (
-        template_registry_hash(loaded.template_registry)
-        != loaded.template_registry.template_registry_sha256
-    ):
-        raise ValueError("Literal template-registry hash does not reconstruct")
+    _verify_template_registry(loaded.template_registry, templates)
+    from unfrozen_schemas.evaluation.literal_generation import _partition_plan
+
+    if _partition_plan(loaded.authoring_snapshot, witnesses) != loaded.partition_plan:
+        raise ValueError("Literal partition plan does not reconstruct from authoring and witnesses")
     rebuilt_lexical = build_lexical_audit(
         candidate_version=version,
         items=loaded.items,
@@ -608,7 +999,7 @@ def validate_loaded_literal_source(
     schema_counts = _count(binding.schema_identity.value for binding in bindings)
     level_counts = _count(binding.transfer_level.value for binding in bindings)
     family_counts = _count(binding.task_family.value for binding in bindings)
-    mechanism_counts = _count(binding.source_mechanism_family for binding in bindings)
+    mechanism_counts = _count(binding.source_mechanism.value for binding in bindings)
     provisional = LiteralValidationReport(
         candidate_version=version,
         purpose=purpose,
@@ -618,6 +1009,11 @@ def validate_loaded_literal_source(
         level_counts=level_counts,
         family_counts=family_counts,
         mechanism_counts=mechanism_counts,
+        lexical_cue_audit=(
+            "OWNER_REVIEW_REQUIRED"
+            if loaded.lexical_audit.status is LiteralAuditStatus.OWNER_REVIEW_REQUIRED
+            else "PASS"
+        ),
         m2_1_lifecycle_validation="not_evaluated_source_stage",
         human_validation_status=(
             "not_applicable_engineering" if manifest.engineering_only else "not_started"
@@ -638,6 +1034,7 @@ def validate_loaded_literal_source(
         "source_manifest.json",
         "items.jsonl",
         f"{LITERAL_DIRECTORY}/{PARTITION_PLAN_FILE}",
+        f"{LITERAL_DIRECTORY}/{AUTHORING_SNAPSHOT_FILE}",
         f"{LITERAL_DIRECTORY}/{TEMPLATE_REGISTRY_FILE}",
         f"{LITERAL_DIRECTORY}/{ITEM_BINDINGS_FILE}",
         f"{LITERAL_DIRECTORY}/{WITNESS_BUNDLE_FILE}",
@@ -656,11 +1053,15 @@ def validate_loaded_literal_source(
     )
     if operation_hash(operation) != operation.operation_sha256:
         raise ValueError("Literal generation-operation hash does not reconstruct")
-    if operation.operation_sha256 != source_bundle.generation_operation_sha256:
+    if operation.operation_sha256 != source_bundle.source_generation_operation_sha256:
         raise ValueError("Literal source bundle binds a different generation operation")
     if operation.artifacts != source_bundle.artifacts:
         raise ValueError("Literal generation operation and source artifact records differ")
     expected_source_hashes = {
+        "authoring_snapshot_file_sha256": sha256_file(
+            _literal_path(loaded.root, AUTHORING_SNAPSHOT_FILE)
+        ),
+        "authoring_snapshot_sha256": authoring_snapshot_hash(loaded.authoring_snapshot),
         "m2_1_source_manifest_sha256": sha256_file(loaded.root / "source_manifest.json"),
         "m2_1_items_file_sha256": sha256_file(loaded.root / "items.jsonl"),
         "partition_plan_sha256": loaded.partition_plan.partition_plan_sha256,
@@ -678,6 +1079,82 @@ def validate_loaded_literal_source(
             raise ValueError(f"Literal source bundle has a stale {field}")
     if source_bundle_hash(source_bundle) != source_bundle.literal_source_bundle_sha256:
         raise ValueError("Literal source-bundle hash does not reconstruct")
+    if operation.operation_kind != "generate_literal_source" or operation.status != "COMPLETED":
+        raise ValueError("Literal source operation kind/status is invalid")
+    expected_input_hashes = {
+        "authoring_input_file_sha256": source_bundle.authoring_input_file_sha256,
+        "tracked_configuration_file_sha256": source_bundle.tracked_configuration_file_sha256,
+    }
+    expected_output_hashes = {
+        "literal_source_bundle_sha256": source_bundle.literal_source_bundle_sha256
+    }
+    if (
+        operation.engineering_only != manifest.engineering_only
+        or operation.scientific_result is not False
+        or operation.git != source_bundle.git
+        or operation.codex_spec_sha256 != source_bundle.codex_spec_sha256
+        or operation.resolved_configuration != source_bundle.resolved_configuration
+        or operation.input_hashes != expected_input_hashes
+        or operation.output_hashes != expected_output_hashes
+        or operation.item_count != len(loaded.items)
+        or operation.semantic_group_count != len(bindings)
+        or operation.schema_counts != schema_counts
+        or operation.level_counts != level_counts
+        or operation.family_counts != family_counts
+    ):
+        raise ValueError("Literal source-generation operation provenance is inconsistent")
+    from unfrozen_schemas.evaluation.literal_generation import _resource_budget
+
+    expected_budget = _resource_budget(
+        operation_id=operation.operation_id,
+        started_at=operation.started_at,
+        ended_at=operation.ended_at,
+        elapsed=operation.resource_budget.elapsed_compute_seconds or 0.0,
+        peak_memory=operation.resource_budget.peak_memory_bytes,
+        witnesses=witnesses,
+        artifact_count=len(operation.artifacts),
+        artifact_bytes=sum(item.size_bytes for item in operation.artifacts),
+    )
+    if operation.resource_budget != expected_budget:
+        raise ValueError("Literal source ResourceBudget does not reconstruct")
+    from unfrozen_schemas.config import find_repository_root
+    from unfrozen_schemas.literal_config import load_literal_config
+    from unfrozen_schemas.provenance import (
+        capture_git_state,
+        collect_package_versions,
+        collect_platform_information,
+    )
+
+    repository = find_repository_root(Path.cwd())
+    if (
+        operation.package_versions != collect_package_versions()
+        or operation.platform != collect_platform_information()
+    ):
+        raise ValueError("Literal source package/platform provenance is stale")
+    if sha256_file(repository / "CODEX_SPEC.md") != source_bundle.codex_spec_sha256:
+        raise ValueError("Literal source CODEX_SPEC identity is stale")
+    if not manifest.engineering_only:
+        current_git = capture_git_state(repository)
+        if current_git.dirty or current_git.commit != source_bundle.git.commit:
+            raise ValueError("Outcome literal source does not match the current clean Git head")
+    config_relative = str(source_bundle.resolved_configuration.get("source_config_path", ""))
+    config_path = (repository / config_relative).resolve()
+    if (
+        not config_path.is_file()
+        or sha256_file(config_path) != source_bundle.tracked_configuration_file_sha256
+    ):
+        raise ValueError("Tracked literal configuration is missing or changed")
+    configured = load_literal_config(config_path)
+    if configured.resolved.model_dump(mode="json") != source_bundle.resolved_configuration:
+        raise ValueError("Tracked and retained resolved literal configurations differ")
+    if (
+        not configured.authoring_manifest.is_file()
+        or sha256_file(configured.authoring_manifest) != source_bundle.authoring_input_file_sha256
+    ):
+        raise ValueError("Literal authoring input file is missing or changed")
+    from unfrozen_schemas.evaluation.literal_generation import _coverage
+
+    _coverage(configured, bindings)
     return expected
 
 
@@ -706,6 +1183,11 @@ def review_content_records(
                 "schema_identity": binding.schema_identity,
                 "transfer_level": binding.transfer_level,
                 "task_family": binding.task_family,
+                "partition": binding.partition,
+                "scenario_case": binding.scenario_case,
+                "source_mechanism": binding.source_mechanism,
+                "structural_novelty_dimensions": binding.structural_novelty_dimensions,
+                "structural_signatures": binding.structural_signatures,
                 "prompt": left.model_visible.prompt,
                 "instructions": left.model_visible.instructions,
                 "option_forms": (
@@ -721,7 +1203,10 @@ def review_content_records(
                 "stable_correct_option_id": binding.stable_correct_option_id,
                 "actual_outcome_code": witness.actual_outcome_code,
                 "counterfactual_outcome_code": witness.counterfactual_outcome_code,
-                "causal_factor": witness.declared_causal_factor,
+                "intervention_contract": witness.intervention_contract,
+                "observed_initial_difference_paths": (witness.observed_initial_difference_paths),
+                "observed_action_difference_paths": witness.observed_action_difference_paths,
+                "narrative_facts": witness.narrative_facts,
                 "lexical_cue_annotations": left.scientific_annotations.lexical_cue_annotations,
                 "provenance": left.provenance,
                 "human_validation": left.human_validation,
@@ -745,16 +1230,26 @@ def review_content_records(
 def pending_owner_review(candidate_version: str) -> LiteralPendingOwnerReview:
     return LiteralPendingOwnerReview(
         candidate_version=candidate_version,
-        required_owner_bindings=(
-            "literal_candidate_root_sha256",
-            "literal_validation_report_sha256",
-            "m2_1_candidate_bundle_root_sha256",
-            "m2_1_candidate_manifest_file_sha256",
-            "m2_1_source_snapshot_sha256",
-            "pull_request_head_sha",
-            "pull_request_number",
-            "review_manifest_sha256",
-            "witness_bundle_sha256",
+        required_owner_bindings=tuple(
+            sorted(
+                {
+                    "authoring_snapshot_file_sha256",
+                    "authoring_snapshot_sha256",
+                    "candidate_materialization_operation_sha256",
+                    "literal_candidate_root_sha256",
+                    "literal_validation_report_sha256",
+                    "m2_1_candidate_bundle_root_sha256",
+                    "m2_1_candidate_manifest_file_sha256",
+                    "m2_1_source_snapshot_sha256",
+                    "pull_request_head_sha",
+                    "pull_request_number",
+                    "review_manifest_file_sha256",
+                    "review_manifest_sha256",
+                    "review_operation_sha256",
+                    "source_generation_operation_sha256",
+                    "witness_bundle_sha256",
+                }
+            )
         ),
     )
 

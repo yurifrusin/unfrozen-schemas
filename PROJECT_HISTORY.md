@@ -235,6 +235,26 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
   run, treatment, scientific result, Phase I gate decision, M2.3 work, or EPS-worktree change has
   occurred.
 
+### 2026-08-26 — M2.2 pre-merge semantic and review-integrity correction
+
+- Continued pull request `#7` on `codex/milestone-2-m2-2-literal-counterfactuals` after exact branch,
+  head, upstream, pull-request, canonical-main, clean-tree, and protected CPU-check preflight.
+- Replaced authoritative free causal/narrative prose and positive/negative option conventions with a
+  retained typed authoring snapshot, explicit outcome-code registry, prospective intervention
+  contracts, simulator-derived narrative facts, and seed/ID-independent structural signatures.
+- Added one-to-one snapshot/source/binding/witness reconciliation; verified L1/L2 exact identity
+  separation and L2 structural novelty; corrected lexical findings to remain owner-review pending;
+  and bound operational provenance separately from portable logical roots.
+- Split explicit candidate materialisation from strictly read-only validation. Source generation,
+  candidate materialisation, and review construction now use staged fail-closed publication and
+  governed failure records.
+- Expanded private review records and deterministic inspection to actual/counterfactual before/after
+  renders, decoded Pillow validation, exact PNG artifact hashes, raw-pixel identities, and exact
+  snapshot/operation/manifest owner-binding requirements.
+- Status: tracked correction and local verification are in progress. The private outcome artifacts
+  remain provisional and will be regenerated only from the final pushed, clean, CPU-green head. No
+  merge, tag, release, freeze, M2.3, model/GPU, treatment, or EPS-worktree work occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

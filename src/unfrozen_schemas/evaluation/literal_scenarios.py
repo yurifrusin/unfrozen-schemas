@@ -18,12 +18,21 @@ from unfrozen_schemas.envs.schema_world.state import (
     Tether,
     WorldState,
 )
+from unfrozen_schemas.evaluation.literal_contracts import (
+    intervention_contract,
+    narrative_facts,
+    source_mechanism,
+    structural_signatures,
+)
 from unfrozen_schemas.evaluation.literal_hashing import witness_hash
 from unfrozen_schemas.evaluation.literal_models import (
     ContainmentScenarioCase,
     LiteralDirection,
+    LiteralOutcomeCode,
     LiteralScenarioSpec,
     LiteralSchema,
+    LiteralTemplate,
+    LiteralTransferLevel,
     LiteralWitnessRecord,
     SupportScenarioCase,
 )
@@ -78,6 +87,20 @@ def _containment_position(
     return (orthogonal, 4_100 if direction is LiteralDirection.EXIT else 3_700, 0, -400)
 
 
+def _entity_ids(spec: LiteralScenarioSpec) -> tuple[str, str, str, str]:
+    if spec.transfer_level is LiteralTransferLevel.L1:
+        return "e0001", "e0002", "e0003", "t0001"
+    return "e0101", "e0102", "e0103", "t0101"
+
+
+def _no_effect_action(spec: LiteralScenarioSpec) -> Action:
+    return Action(
+        kind=(
+            ActionKind.NOOP if spec.transfer_level is LiteralTransferLevel.L1 else ActionKind.WAIT
+        )
+    )
+
+
 def _containment_states(
     spec: LiteralScenarioSpec,
 ) -> tuple[WorldState, WorldState, tuple[Action, ...], tuple[Action, ...]]:
@@ -88,9 +111,10 @@ def _containment_states(
     multiplier = 1 if spec.direction is LiteralDirection.EXIT else -1
     delta_x = exit_delta_x * multiplier
     delta_y = exit_delta_y * multiplier
+    object_id, container_id, _anchor_id, _tether_id = _entity_ids(spec)
     entities: list[Entity] = [
         Entity(
-            entity_id="e0001",
+            entity_id=object_id,
             role=EntityRole.OBJECT,
             x=object_x,
             y=object_y,
@@ -99,7 +123,7 @@ def _containment_states(
             movable=True,
         ),
         Entity(
-            entity_id="e0002",
+            entity_id=container_id,
             role=EntityRole.CONTAINER,
             x=4_000,
             y=4_000,
@@ -121,7 +145,7 @@ def _containment_states(
     entities_tuple = tuple(sorted(entities, key=lambda item: item.entity_id))
     boundary_actual = Boundary(
         boundary_id="b0001",
-        container_id="e0002",
+        container_id=container_id,
         thickness=100,
         closed=spec.scenario_case is not ContainmentScenarioCase.FULLY_OPEN_BOUNDARY,
     )
@@ -187,7 +211,7 @@ def _containment_states(
     actions = (
         Action(
             kind=action_kind,
-            target_id="e0001",
+            target_id=object_id,
             delta_x=delta_x,
             delta_y=delta_y,
         ),
@@ -195,11 +219,14 @@ def _containment_states(
     return actual_state, counterfactual_state, actions, actions
 
 
-def _support_entities(*, platform: str, include_distractor: bool) -> tuple[Entity, ...]:
+def _support_entities(
+    spec: LiteralScenarioSpec, *, platform: str, include_distractor: bool
+) -> tuple[Entity, ...]:
+    object_id, support_id, anchor_id, _tether_id = _entity_ids(spec)
     platform_position = (4_000, 4_800) if platform == "lower" else (4_200, 5_000)
     entities = [
         Entity(
-            entity_id="e0001",
+            entity_id=object_id,
             role=EntityRole.OBJECT,
             x=4_000,
             y=5_000,
@@ -209,7 +236,7 @@ def _support_entities(*, platform: str, include_distractor: bool) -> tuple[Entit
             affected_by_gravity=True,
         ),
         Entity(
-            entity_id="e0002",
+            entity_id=support_id,
             role=EntityRole.SUPPORT,
             x=platform_position[0],
             y=platform_position[1],
@@ -217,7 +244,7 @@ def _support_entities(*, platform: str, include_distractor: bool) -> tuple[Entit
             height=200,
         ),
         Entity(
-            entity_id="e0003",
+            entity_id=anchor_id,
             role=EntityRole.ANCHOR,
             x=4_050,
             y=5_750,
@@ -246,18 +273,21 @@ def _support_state(
     tether: bool,
     tether_load_bearing: bool = True,
 ) -> WorldState:
+    object_id, _support_id, anchor_id, tether_id = _entity_ids(spec)
     return WorldState(
         gravity_per_step=-100,
         seed=spec.seed,
         noise_seed=spec.noise_seed,
         step_index=0,
         max_steps=4,
-        entities=_support_entities(platform=platform, include_distractor=spec.include_distractor),
+        entities=_support_entities(
+            spec, platform=platform, include_distractor=spec.include_distractor
+        ),
         tethers=(
             Tether(
-                tether_id="t0001",
-                object_id="e0001",
-                anchor_id="e0003",
+                tether_id=tether_id,
+                object_id=object_id,
+                anchor_id=anchor_id,
                 length=700,
                 load_bearing=tether_load_bearing,
             ),
@@ -272,50 +302,52 @@ def _support_states(
 ) -> tuple[WorldState, WorldState, tuple[Action, ...], tuple[Action, ...]]:
     case = spec.scenario_case
     assert isinstance(case, SupportScenarioCase)
+    _object_id, support_id, _anchor_id, tether_id = _entity_ids(spec)
+    no_effect = _no_effect_action(spec)
     if case is SupportScenarioCase.LOWER_SUPPORT_REMOVAL:
         state = _support_state(spec, platform="lower", tether=False)
         return (
             state,
             state,
-            (Action(kind=ActionKind.REMOVE_SUPPORT, target_id="e0002"),),
-            (Action(kind=ActionKind.NOOP),),
+            (Action(kind=ActionKind.REMOVE_SUPPORT, target_id=support_id),),
+            (no_effect,),
         )
     if case is SupportScenarioCase.LOWER_SUPPORT_NOOP:
         state = _support_state(spec, platform="lower", tether=False)
         return (
             state,
             state,
-            (Action(kind=ActionKind.NOOP),),
-            (Action(kind=ActionKind.REMOVE_SUPPORT, target_id="e0002"),),
+            (no_effect,),
+            (Action(kind=ActionKind.REMOVE_SUPPORT, target_id=support_id),),
         )
     if case is SupportScenarioCase.SIDE_CONTACT:
         return (
             _support_state(spec, platform="side", tether=False),
             _support_state(spec, platform="lower", tether=False),
-            (Action(kind=ActionKind.NOOP),),
-            (Action(kind=ActionKind.NOOP),),
+            (no_effect,),
+            (no_effect,),
         )
     if case is SupportScenarioCase.TETHER_CUT:
         state = _support_state(spec, platform="side", tether=True)
         return (
             state,
             state,
-            (Action(kind=ActionKind.CUT_OR_BREAK, target_id="t0001"),),
-            (Action(kind=ActionKind.NOOP),),
+            (Action(kind=ActionKind.CUT_OR_BREAK, target_id=tether_id),),
+            (no_effect,),
         )
     if case is SupportScenarioCase.TETHERED_PLATFORM_REMOVAL:
         state = _support_state(spec, platform="side", tether=True)
         return (
             state,
             state,
-            (Action(kind=ActionKind.REMOVE_SUPPORT, target_id="e0002"),),
-            (Action(kind=ActionKind.DETACH, target_id="t0001"),),
+            (Action(kind=ActionKind.REMOVE_SUPPORT, target_id=support_id),),
+            (Action(kind=ActionKind.DETACH, target_id=tether_id),),
         )
     return (
         _support_state(spec, platform="side", tether=True, tether_load_bearing=False),
         _support_state(spec, platform="side", tether=True, tether_load_bearing=True),
-        (Action(kind=ActionKind.NOOP),),
-        (Action(kind=ActionKind.NOOP),),
+        (no_effect,),
+        (no_effect,),
     )
 
 
@@ -345,23 +377,25 @@ def _replay(
 
 def derive_outcome_code(
     schema: LiteralSchema, initial_state: WorldState, final_state: WorldState
-) -> str:
-    before = initial_state.entity("e0001")
-    after = final_state.entity("e0001")
+) -> LiteralOutcomeCode:
+    before = next(item for item in initial_state.entities if item.role is EntityRole.OBJECT)
+    after = next(item for item in final_state.entities if item.role is EntityRole.OBJECT)
     if schema is LiteralSchema.CONTAINMENT:
         return (
-            "movement-succeeds"
+            LiteralOutcomeCode.MOVEMENT_SUCCEEDS
             if (before.x, before.y) != (after.x, after.y)
-            else "movement-blocked"
+            else LiteralOutcomeCode.MOVEMENT_BLOCKED
         )
-    return "object-falls" if after.y < before.y else "object-stays"
+    return (
+        LiteralOutcomeCode.OBJECT_FALLS if after.y < before.y else LiteralOutcomeCode.OBJECT_STAYS
+    )
 
 
-def correct_option_id_for_outcome(outcome_code: str) -> str:
-    return outcome_code
+def correct_option_id_for_outcome(outcome_code: LiteralOutcomeCode) -> str:
+    return outcome_code.value
 
 
-def build_witness(spec: LiteralScenarioSpec) -> LiteralWitnessRecord:
+def build_witness(spec: LiteralScenarioSpec, template: LiteralTemplate) -> LiteralWitnessRecord:
     actual_initial, counterfactual_initial, actual_actions, counterfactual_actions = scenario_plans(
         spec
     )
@@ -375,15 +409,40 @@ def build_witness(spec: LiteralScenarioSpec) -> LiteralWitnessRecord:
     counterfactual_outcome = derive_outcome_code(
         spec.schema_identity, counterfactual_initial, counterfactual_final
     )
+    contract = intervention_contract(spec.scenario_case)
+    if spec.intervention_kind is not contract.intervention_kind:
+        raise ValueError(f"Scenario {spec.semantic_group_id} declares the wrong intervention kind")
+    signatures = structural_signatures(
+        spec,
+        template,
+        actual_initial,
+        counterfactual_initial,
+        actual_actions,
+        counterfactual_actions,
+        actual_outcome,
+        counterfactual_outcome,
+    )
+    facts = narrative_facts(
+        spec,
+        actual_initial,
+        counterfactual_initial,
+        actual_actions,
+        counterfactual_actions,
+    )
     provisional = LiteralWitnessRecord(
         semantic_group_id=spec.semantic_group_id,
         item_ids=literal_item_ids(spec.semantic_group_id),
         schema_identity=spec.schema_identity,
         transfer_level=spec.transfer_level,
         task_family=spec.task_family,
-        source_mechanism_family=spec.source_mechanism_family,
+        source_mechanism=source_mechanism(spec.scenario_case),
         prompt_template_id=spec.prompt_template_id,
         partition=spec.partition,
+        scenario_case=spec.scenario_case,
+        intervention_kind=spec.intervention_kind,
+        structural_novelty_dimensions=spec.structural_novelty_dimensions,
+        matched_stratum_id=spec.matched_stratum_id,
+        analogy_reference_group_id=spec.analogy_reference_group_id,
         seed=spec.seed,
         noise_seed=spec.noise_seed,
         initial_privileged_state=actual_initial,
@@ -406,13 +465,14 @@ def build_witness(spec: LiteralScenarioSpec) -> LiteralWitnessRecord:
         counterfactual_transition_hashes=counterfactual_hashes,
         actual_relations=actual_relations,
         counterfactual_relations=cf_relations,
-        declared_causal_factor=spec.declared_causal_factor,
-        declared_non_target_equality_fields=spec.declared_non_target_equality_fields,
-        declared_initial_difference_paths=difference_paths(actual_initial, counterfactual_initial),
-        declared_action_difference_paths=difference_paths(actual_actions, counterfactual_actions),
+        intervention_contract=contract,
+        observed_initial_difference_paths=difference_paths(actual_initial, counterfactual_initial),
+        observed_action_difference_paths=difference_paths(actual_actions, counterfactual_actions),
         actual_outcome_code=actual_outcome,
         counterfactual_outcome_code=counterfactual_outcome,
         stable_correct_option_id=correct_option_id_for_outcome(actual_outcome),
+        structural_signatures=signatures,
+        narrative_facts=facts,
         witness_sha256="0" * 64,
     )
     return provisional.model_copy(update={"witness_sha256": witness_hash(provisional)})

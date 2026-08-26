@@ -8,6 +8,7 @@ from typing import Any
 
 from unfrozen_schemas.evaluation.benchmark_hashing import canonical_logical_bytes
 from unfrozen_schemas.evaluation.literal_models import (
+    LiteralAuthoringManifest,
     LiteralCandidateManifest,
     LiteralItemBinding,
     LiteralItemBindingBundle,
@@ -27,6 +28,8 @@ from unfrozen_schemas.evaluation.literal_models import (
 LITERAL_HASH_DOMAINS: frozenset[str] = frozenset(
     {
         "unfrozen-schemas/literal/literal-partition-plan/v1",
+        "unfrozen-schemas/literal/literal-authoring-snapshot/v1",
+        "unfrozen-schemas/literal/literal-structural-signature/v1",
         "unfrozen-schemas/literal/literal-template/v1",
         "unfrozen-schemas/literal/literal-template-registry/v1",
         "unfrozen-schemas/literal/literal-item-binding/v1",
@@ -43,6 +46,17 @@ LITERAL_HASH_DOMAINS: frozenset[str] = frozenset(
         "unfrozen-schemas/literal/literal-operation/v1",
     }
 )
+
+
+def authoring_snapshot_hash(value: LiteralAuthoringManifest) -> str:
+    return literal_hash("unfrozen-schemas/literal/literal-authoring-snapshot/v1", value)
+
+
+def structural_signature_hash(kind: str, payload: Any) -> str:
+    return literal_hash(
+        "unfrozen-schemas/literal/literal-structural-signature/v1",
+        {"signature_kind": kind, "value": payload},
+    )
 
 
 def literal_hash(domain: str, payload: Any) -> str:
@@ -130,7 +144,8 @@ def source_bundle_hash(value: LiteralSourceBundleManifest) -> str:
             mode="json",
             exclude={
                 "artifacts",
-                "generation_operation_sha256",
+                "source_generation_operation_sha256",
+                "git",
                 "literal_source_bundle_sha256",
             },
         ),
@@ -145,13 +160,26 @@ def review_content_bundle_hash(records: Sequence[dict[str, object]]) -> str:
 
 
 def review_manifest_hash(value: LiteralReviewManifest) -> str:
-    payload = value.model_dump(mode="json", exclude={"review_manifest_sha256"})
+    payload = value.model_dump(
+        mode="json",
+        exclude={
+            "git",
+            "source_generation_operation_sha256",
+            "candidate_materialization_operation_sha256",
+            "review_operation_sha256",
+            "review_manifest_sha256",
+        },
+    )
     # PNG container bytes may differ across operating systems even when the
-    # exact raw scientific inspection pixels agree. Exact PNG file hashes stay
-    # in the manifest for local read-back; the logical manifest root binds the
-    # stable raw-pixel identities and all non-render artifacts.
+    # exact raw scientific inspection pixels agree. Operation records likewise
+    # contain timestamps and platform details. Their exact hashes stay in the
+    # manifest for local read-back; the logical root binds stable raw-pixel
+    # identities and deterministic review content.
     payload["artifacts"] = [
-        artifact for artifact in payload["artifacts"] if not str(artifact["path"]).endswith(".png")
+        artifact
+        for artifact in payload["artifacts"]
+        if not str(artifact["path"]).endswith(".png")
+        and artifact["path"] != "review_operation_record.json"
     ]
     return literal_hash(
         "unfrozen-schemas/literal/literal-review-manifest/v1",
@@ -169,6 +197,7 @@ def literal_candidate_root_hash(value: LiteralCandidateManifest) -> str:
             exclude={
                 "git",
                 "m2_1_candidate_manifest_file_sha256",
+                "source_generation_operation_sha256",
                 "literal_candidate_root_sha256",
             },
         ),

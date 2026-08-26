@@ -1,248 +1,279 @@
 {
+  "schema_version": "2",
   "authoring_kind": "private_literal_authoring",
   "candidate_version": "engineering-literal-fixture-v1",
-  "engineering_only": true,
+  "purpose": "engineering",
   "environment_version": "schemaworld-core-v1",
   "generator_version": "literal-generator-v1",
   "partition_plan_version": "literal-partition-plan-v1",
+  "outcome_text_registry_version": "literal-outcome-text-registry-v1",
+  "engineering_only": true,
+  "scientific_eligible": false,
   "promotable": false,
+  "templates": [
+    {
+      "template_id": "fixture-route-l1",
+      "task_family": "direct-literal-outcome",
+      "transfer_level": "L1",
+      "vocabulary_mode": "engineering_fixture"
+    },
+    {
+      "template_id": "fixture-route-l2",
+      "task_family": "novel-literal-configuration",
+      "transfer_level": "L2",
+      "vocabulary_mode": "engineering_fixture"
+    },
+    {
+      "template_id": "fixture-pad-l1",
+      "task_family": "matched-counterfactual-reasoning",
+      "transfer_level": "L1",
+      "vocabulary_mode": "engineering_fixture"
+    },
+    {
+      "template_id": "fixture-link-l2",
+      "task_family": "literal-physical-mechanism-analogy",
+      "transfer_level": "L2",
+      "vocabulary_mode": "engineering_fixture"
+    }
+  ],
+  "outcome_text_registry": [
+    {
+      "text_id": "outcome-001",
+      "outcome_code": "movement-succeeds",
+      "text": "Status alpha is recorded."
+    },
+    {
+      "text_id": "outcome-002",
+      "outcome_code": "movement-blocked",
+      "text": "Status beta is recorded."
+    },
+    {
+      "text_id": "outcome-003",
+      "outcome_code": "object-falls",
+      "text": "Status gamma is recorded."
+    },
+    {
+      "text_id": "outcome-004",
+      "outcome_code": "object-stays",
+      "text": "Status delta is recorded."
+    }
+  ],
+  "scenarios": [
+    {
+      "semantic_group_id": "fixture-route-l1-pass",
+      "schema_identity": "CONTAINMENT",
+      "transfer_level": "L1",
+      "task_family": "direct-literal-outcome",
+      "partition": "l1-held-out-literal",
+      "prompt_template_id": "fixture-route-l1",
+      "scenario_case": "fitting-opening",
+      "side": "right",
+      "direction": "exit",
+      "intervention_kind": "opening-enabled-state",
+      "seed": 101,
+      "noise_seed": 1101,
+      "include_distractor": false,
+      "scene_name": "Fixture Scene A",
+      "outcome_text_record_ids": [
+        "outcome-001",
+        "outcome-002"
+      ],
+      "structural_novelty_dimensions": [],
+      "matched_stratum_id": "stratum-containment-fitting-opening-right-exit-false",
+      "lexical_cue_annotations": [
+        "synthetic-route-code",
+        "synthetic-status-label"
+      ]
+    },
+    {
+      "semantic_group_id": "fixture-route-l1-halt",
+      "schema_identity": "CONTAINMENT",
+      "transfer_level": "L1",
+      "task_family": "direct-literal-outcome",
+      "partition": "l1-held-out-literal",
+      "prompt_template_id": "fixture-route-l1",
+      "scenario_case": "undersized-opening",
+      "side": "top",
+      "direction": "exit",
+      "intervention_kind": "opening-span",
+      "seed": 102,
+      "noise_seed": 1102,
+      "include_distractor": true,
+      "scene_name": "Fixture Scene B",
+      "outcome_text_record_ids": [
+        "outcome-001",
+        "outcome-002"
+      ],
+      "structural_novelty_dimensions": [],
+      "matched_stratum_id": "stratum-containment-undersized-opening-top-exit-true",
+      "lexical_cue_annotations": [
+        "synthetic-route-code",
+        "synthetic-status-label"
+      ]
+    },
+    {
+      "semantic_group_id": "fixture-route-l2-pass",
+      "schema_identity": "CONTAINMENT",
+      "transfer_level": "L2",
+      "task_family": "novel-literal-configuration",
+      "partition": "l2-novel-configuration",
+      "prompt_template_id": "fixture-route-l2",
+      "scenario_case": "fully-open-boundary",
+      "side": "left",
+      "direction": "entry",
+      "intervention_kind": "boundary-closure",
+      "seed": 103,
+      "noise_seed": 1103,
+      "include_distractor": false,
+      "scene_name": "Fixture Scene C",
+      "outcome_text_record_ids": [
+        "outcome-001",
+        "outcome-002"
+      ],
+      "structural_novelty_dimensions": [
+        "qualitative-geometry"
+      ],
+      "matched_stratum_id": "stratum-containment-fully-open-boundary-left-entry-false",
+      "lexical_cue_annotations": [
+        "synthetic-layout-code",
+        "synthetic-status-label"
+      ]
+    },
+    {
+      "semantic_group_id": "fixture-route-l2-halt",
+      "schema_identity": "CONTAINMENT",
+      "transfer_level": "L2",
+      "task_family": "novel-literal-configuration",
+      "partition": "l2-novel-configuration",
+      "prompt_template_id": "fixture-route-l2",
+      "scenario_case": "misaligned-opening",
+      "side": "bottom",
+      "direction": "entry",
+      "intervention_kind": "opening-alignment",
+      "seed": 104,
+      "noise_seed": 1104,
+      "include_distractor": true,
+      "scene_name": "Fixture Scene D",
+      "outcome_text_record_ids": [
+        "outcome-001",
+        "outcome-002"
+      ],
+      "structural_novelty_dimensions": [
+        "qualitative-geometry"
+      ],
+      "matched_stratum_id": "stratum-containment-misaligned-opening-bottom-entry-true",
+      "lexical_cue_annotations": [
+        "synthetic-layout-code",
+        "synthetic-status-label"
+      ]
+    },
+    {
+      "semantic_group_id": "fixture-pad-l1-shift",
+      "schema_identity": "SUPPORT",
+      "transfer_level": "L1",
+      "task_family": "matched-counterfactual-reasoning",
+      "partition": "l1-held-out-literal",
+      "prompt_template_id": "fixture-pad-l1",
+      "scenario_case": "lower-support-removal",
+      "intervention_kind": "lower-support-action",
+      "seed": 201,
+      "noise_seed": 1201,
+      "include_distractor": false,
+      "scene_name": "Fixture Scene E",
+      "outcome_text_record_ids": [
+        "outcome-003",
+        "outcome-004"
+      ],
+      "structural_novelty_dimensions": [],
+      "matched_stratum_id": "stratum-support-lower-support-removal-false",
+      "lexical_cue_annotations": [
+        "synthetic-pad-code",
+        "synthetic-status-label"
+      ]
+    },
+    {
+      "semantic_group_id": "fixture-pad-l1-steady",
+      "schema_identity": "SUPPORT",
+      "transfer_level": "L1",
+      "task_family": "matched-counterfactual-reasoning",
+      "partition": "l1-held-out-literal",
+      "prompt_template_id": "fixture-pad-l1",
+      "scenario_case": "lower-support-noop",
+      "intervention_kind": "lower-support-action",
+      "seed": 202,
+      "noise_seed": 1202,
+      "include_distractor": true,
+      "scene_name": "Fixture Scene F",
+      "outcome_text_record_ids": [
+        "outcome-003",
+        "outcome-004"
+      ],
+      "structural_novelty_dimensions": [],
+      "matched_stratum_id": "stratum-support-lower-support-noop-true",
+      "lexical_cue_annotations": [
+        "synthetic-pad-code",
+        "synthetic-status-label"
+      ]
+    },
+    {
+      "semantic_group_id": "fixture-link-l2-shift",
+      "schema_identity": "SUPPORT",
+      "transfer_level": "L2",
+      "task_family": "literal-physical-mechanism-analogy",
+      "partition": "l2-mechanism-transfer",
+      "prompt_template_id": "fixture-link-l2",
+      "scenario_case": "tether-cut",
+      "intervention_kind": "tether-cut-action",
+      "seed": 203,
+      "noise_seed": 1203,
+      "include_distractor": false,
+      "scene_name": "Fixture Scene G",
+      "outcome_text_record_ids": [
+        "outcome-003",
+        "outcome-004"
+      ],
+      "structural_novelty_dimensions": [
+        "source-mechanism",
+        "counterfactual-intervention"
+      ],
+      "matched_stratum_id": "stratum-support-tether-cut-false",
+      "lexical_cue_annotations": [
+        "synthetic-link-code",
+        "synthetic-status-label"
+      ],
+      "analogy_reference_group_id": "fixture-pad-l1-shift"
+    },
+    {
+      "semantic_group_id": "fixture-link-l2-steady",
+      "schema_identity": "SUPPORT",
+      "transfer_level": "L2",
+      "task_family": "literal-physical-mechanism-analogy",
+      "partition": "l2-mechanism-transfer",
+      "prompt_template_id": "fixture-link-l2",
+      "scenario_case": "tethered-platform-removal",
+      "intervention_kind": "tether-action-choice",
+      "seed": 204,
+      "noise_seed": 1204,
+      "include_distractor": true,
+      "scene_name": "Fixture Scene H",
+      "outcome_text_record_ids": [
+        "outcome-003",
+        "outcome-004"
+      ],
+      "structural_novelty_dimensions": [
+        "source-mechanism",
+        "counterfactual-intervention"
+      ],
+      "matched_stratum_id": "stratum-support-tethered-platform-removal-true",
+      "lexical_cue_annotations": [
+        "synthetic-link-code",
+        "synthetic-status-label"
+      ],
+      "analogy_reference_group_id": "fixture-pad-l1-steady"
+    }
+  ],
   "prospective_adaptation_strata": [
     "fixture-adaptation-a",
     "fixture-adaptation-b"
-  ],
-  "purpose": "engineering",
-  "schema_version": "1",
-  "scientific_eligible": false,
-  "scenarios": [
-    {
-      "action_word": "toggle",
-      "actual_action_description": "sets route code to amber",
-      "counterfactual_action_description": "sets route code to cobalt",
-      "declared_causal_factor": "fixture-route-setting",
-      "declared_non_target_equality_fields": ["entities", "gravity_per_step", "seed"],
-      "direction": "exit",
-      "include_distractor": false,
-      "lexical_cue_annotations": ["synthetic-route-code", "synthetic-status-label"],
-      "negative_option_text": "Status beta is recorded.",
-      "noise_seed": 1101,
-      "partition": "l1-held-out-literal",
-      "positive_option_text": "Status alpha is recorded.",
-      "prompt_template_id": "fixture-route-l1",
-      "scenario_case": "fitting-opening",
-      "scene_description": "Panel R1 shows token K beside route amber",
-      "schema_identity": "CONTAINMENT",
-      "seed": 101,
-      "semantic_group_id": "fixture-route-l1-pass",
-      "side": "right",
-      "source_mechanism_family": "fixture-route-mechanism",
-      "structural_novelty_dimensions": [],
-      "task_family": "direct-literal-outcome",
-      "transfer_level": "L1"
-    },
-    {
-      "action_word": "toggle",
-      "actual_action_description": "sets route code to cobalt",
-      "counterfactual_action_description": "sets route code to amber",
-      "declared_causal_factor": "fixture-route-setting",
-      "declared_non_target_equality_fields": ["entities", "gravity_per_step", "seed"],
-      "direction": "exit",
-      "include_distractor": true,
-      "lexical_cue_annotations": ["synthetic-route-code", "synthetic-status-label"],
-      "negative_option_text": "Status beta is recorded.",
-      "noise_seed": 1102,
-      "partition": "l1-held-out-literal",
-      "positive_option_text": "Status alpha is recorded.",
-      "prompt_template_id": "fixture-route-l1",
-      "scenario_case": "undersized-opening",
-      "scene_description": "Panel R2 shows token M beside route cobalt",
-      "schema_identity": "CONTAINMENT",
-      "seed": 102,
-      "semantic_group_id": "fixture-route-l1-halt",
-      "side": "top",
-      "source_mechanism_family": "fixture-route-mechanism",
-      "structural_novelty_dimensions": [],
-      "task_family": "direct-literal-outcome",
-      "transfer_level": "L1"
-    },
-    {
-      "action_word": "toggle",
-      "actual_action_description": "changes route code to lime",
-      "counterfactual_action_description": "changes route code to slate",
-      "declared_causal_factor": "fixture-route-layout",
-      "declared_non_target_equality_fields": ["entities", "gravity_per_step", "seed"],
-      "direction": "entry",
-      "include_distractor": false,
-      "lexical_cue_annotations": ["synthetic-layout-code", "synthetic-status-label"],
-      "negative_option_text": "Status beta is recorded.",
-      "noise_seed": 1103,
-      "partition": "l2-novel-configuration",
-      "positive_option_text": "Status alpha is recorded.",
-      "prompt_template_id": "fixture-route-l2",
-      "scenario_case": "fully-open-boundary",
-      "scene_description": "Panel R3 shows token Q beside route lime",
-      "schema_identity": "CONTAINMENT",
-      "seed": 103,
-      "semantic_group_id": "fixture-route-l2-pass",
-      "side": "left",
-      "source_mechanism_family": "fixture-route-mechanism",
-      "structural_novelty_dimensions": ["axis-direction-change", "perimeter-layout-change"],
-      "task_family": "literal-intervention-consequence",
-      "transfer_level": "L2"
-    },
-    {
-      "action_word": "toggle",
-      "actual_action_description": "changes route code to slate",
-      "counterfactual_action_description": "changes route code to lime",
-      "declared_causal_factor": "fixture-route-layout",
-      "declared_non_target_equality_fields": ["entities", "gravity_per_step", "seed"],
-      "direction": "entry",
-      "include_distractor": true,
-      "lexical_cue_annotations": ["synthetic-layout-code", "synthetic-status-label"],
-      "negative_option_text": "Status beta is recorded.",
-      "noise_seed": 1104,
-      "partition": "l2-novel-configuration",
-      "positive_option_text": "Status alpha is recorded.",
-      "prompt_template_id": "fixture-route-l2",
-      "scenario_case": "misaligned-opening",
-      "scene_description": "Panel R4 shows token V beside route slate",
-      "schema_identity": "CONTAINMENT",
-      "seed": 104,
-      "semantic_group_id": "fixture-route-l2-halt",
-      "side": "bottom",
-      "source_mechanism_family": "fixture-route-mechanism",
-      "structural_novelty_dimensions": ["axis-direction-change", "alignment-change"],
-      "task_family": "literal-intervention-consequence",
-      "transfer_level": "L2"
-    },
-    {
-      "action_word": "cycle",
-      "actual_action_description": "cycles pad code to red",
-      "counterfactual_action_description": "cycles pad code to grey",
-      "declared_causal_factor": "fixture-pad-operation",
-      "declared_non_target_equality_fields": ["initial_state", "transition_horizon"],
-      "direction": null,
-      "include_distractor": false,
-      "lexical_cue_annotations": ["synthetic-pad-code", "synthetic-status-label"],
-      "negative_option_text": "Status delta is recorded.",
-      "noise_seed": 1201,
-      "partition": "l1-held-out-literal",
-      "positive_option_text": "Status gamma is recorded.",
-      "prompt_template_id": "fixture-pad-l1",
-      "scenario_case": "lower-support-removal",
-      "scene_description": "Panel P1 shows token A above pad red",
-      "schema_identity": "SUPPORT",
-      "seed": 201,
-      "semantic_group_id": "fixture-pad-l1-shift",
-      "side": null,
-      "source_mechanism_family": "fixture-pad-mechanism",
-      "structural_novelty_dimensions": [],
-      "task_family": "matched-counterfactual-reasoning",
-      "transfer_level": "L1"
-    },
-    {
-      "action_word": "cycle",
-      "actual_action_description": "cycles pad code to grey",
-      "counterfactual_action_description": "cycles pad code to red",
-      "declared_causal_factor": "fixture-pad-operation",
-      "declared_non_target_equality_fields": ["initial_state", "transition_horizon"],
-      "direction": null,
-      "include_distractor": true,
-      "lexical_cue_annotations": ["synthetic-pad-code", "synthetic-status-label"],
-      "negative_option_text": "Status delta is recorded.",
-      "noise_seed": 1202,
-      "partition": "l1-held-out-literal",
-      "positive_option_text": "Status gamma is recorded.",
-      "prompt_template_id": "fixture-pad-l1",
-      "scenario_case": "lower-support-noop",
-      "scene_description": "Panel P2 shows token B above pad grey",
-      "schema_identity": "SUPPORT",
-      "seed": 202,
-      "semantic_group_id": "fixture-pad-l1-steady",
-      "side": null,
-      "source_mechanism_family": "fixture-pad-mechanism",
-      "structural_novelty_dimensions": [],
-      "task_family": "matched-counterfactual-reasoning",
-      "transfer_level": "L1"
-    },
-    {
-      "action_word": "cycle",
-      "actual_action_description": "cycles link code to violet",
-      "counterfactual_action_description": "cycles link code to white",
-      "declared_causal_factor": "fixture-link-operation",
-      "declared_non_target_equality_fields": ["initial_state", "transition_horizon"],
-      "direction": null,
-      "include_distractor": false,
-      "lexical_cue_annotations": ["synthetic-link-code", "synthetic-status-label"],
-      "negative_option_text": "Status delta is recorded.",
-      "noise_seed": 1203,
-      "partition": "l2-mechanism-transfer",
-      "positive_option_text": "Status gamma is recorded.",
-      "prompt_template_id": "fixture-link-l2",
-      "scenario_case": "tether-cut",
-      "scene_description": "Panel P3 shows token C near link violet",
-      "schema_identity": "SUPPORT",
-      "seed": 203,
-      "semantic_group_id": "fixture-link-l2-shift",
-      "side": null,
-      "source_mechanism_family": "fixture-link-mechanism",
-      "structural_novelty_dimensions": ["connection-mode-change", "action-topology-change"],
-      "task_family": "novel-literal-configuration",
-      "transfer_level": "L2"
-    },
-    {
-      "action_word": "cycle",
-      "actual_action_description": "cycles link code to white",
-      "counterfactual_action_description": "cycles link code to violet",
-      "declared_causal_factor": "fixture-link-operation",
-      "declared_non_target_equality_fields": ["initial_state", "transition_horizon"],
-      "direction": null,
-      "include_distractor": true,
-      "lexical_cue_annotations": ["synthetic-link-code", "synthetic-status-label"],
-      "negative_option_text": "Status delta is recorded.",
-      "noise_seed": 1204,
-      "partition": "l2-mechanism-transfer",
-      "positive_option_text": "Status gamma is recorded.",
-      "prompt_template_id": "fixture-link-l2",
-      "scenario_case": "tethered-platform-removal",
-      "scene_description": "Panel P4 shows token D near link white",
-      "schema_identity": "SUPPORT",
-      "seed": 204,
-      "semantic_group_id": "fixture-link-l2-steady",
-      "side": null,
-      "source_mechanism_family": "fixture-link-mechanism",
-      "structural_novelty_dimensions": ["connection-mode-change", "irrelevant-removal-change"],
-      "task_family": "novel-literal-configuration",
-      "transfer_level": "L2"
-    }
-  ],
-  "templates": [
-    {
-      "instructions": "Choose exactly one synthetic status.",
-      "prompt_format": "Fixture {scene_description}. The operator {actual_action_description}. Which status follows?",
-      "task_family": "direct-literal-outcome",
-      "template_id": "fixture-route-l1",
-      "transfer_level": "L1"
-    },
-    {
-      "instructions": "Choose exactly one synthetic status.",
-      "prompt_format": "Fixture {scene_description}. The operator {actual_action_description}, rather than {counterfactual_action_description}. Which status follows?",
-      "task_family": "literal-intervention-consequence",
-      "template_id": "fixture-route-l2",
-      "transfer_level": "L2"
-    },
-    {
-      "instructions": "Choose exactly one synthetic status.",
-      "prompt_format": "Fixture {scene_description}. The operator {actual_action_description}, rather than {counterfactual_action_description}. Which status follows?",
-      "task_family": "matched-counterfactual-reasoning",
-      "template_id": "fixture-pad-l1",
-      "transfer_level": "L1"
-    },
-    {
-      "instructions": "Choose exactly one synthetic status.",
-      "prompt_format": "Fixture {scene_description}. The operator {actual_action_description}, rather than {counterfactual_action_description}. Which status follows?",
-      "task_family": "novel-literal-configuration",
-      "template_id": "fixture-link-l2",
-      "transfer_level": "L2"
-    }
   ]
 }
