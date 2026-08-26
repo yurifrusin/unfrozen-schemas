@@ -39,6 +39,16 @@ from unfrozen_schemas.evaluation.benchmark_validation import (
     audit_tracked_benchmark_paths,
     validate_benchmark_manifest,
 )
+from unfrozen_schemas.evaluation.literal_generation import generate_literal_source
+from unfrozen_schemas.evaluation.literal_models import LiteralOperationError
+from unfrozen_schemas.evaluation.literal_review import (
+    build_literal_review,
+    inspect_literal_item,
+    validate_literal_benchmark,
+    validate_literal_review,
+)
+from unfrozen_schemas.evaluation.literal_validation import validate_literal_source
+from unfrozen_schemas.literal_config import load_literal_config
 from unfrozen_schemas.provenance import BootstrapFailureRecord, RunManifest
 from unfrozen_schemas.smoke import SmokeRunError, run_smoke
 
@@ -598,6 +608,248 @@ def audit_benchmark_git_command() -> None:
         typer.echo(f"Benchmark Git audit failed: {type(exc).__name__}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(f"Benchmark Git audit passed: {len(tracked)} tracked safe path(s)")
+
+
+@app.command("generate-literal-source")
+def generate_literal_source_command(
+    config: Annotated[
+        Path,
+        typer.Option(
+            "--config",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="Tracked M2.2 literal configuration.",
+        ),
+    ],
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Derive and validate logical identities without writes."),
+    ] = False,
+    source: Annotated[
+        Path | None,
+        typer.Option(
+            "--source",
+            file_okay=False,
+            help="Engineering-only isolated source destination override.",
+        ),
+    ] = None,
+) -> None:
+    """Generate a private M2.1 source plus independently hash-bound M2.2 sidecars."""
+
+    try:
+        loaded = load_literal_config(config, source_root_override=source)
+        result = generate_literal_source(loaded, dry_run=dry_run)
+    except (LiteralOperationError, ConfigLoadError, ValidationError, ValueError) as exc:
+        typer.echo(f"Literal source generation failed: {type(exc).__name__}: {exc}", err=True)
+        if isinstance(exc, LiteralOperationError) and exc.failure_record_path:
+            typer.echo(f"Governed failure record: {exc.failure_record_path}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(result.model_dump(mode="json"), sort_keys=True, separators=(",", ":")))
+
+
+@app.command("validate-literal-source")
+def validate_literal_source_command(
+    source: Annotated[
+        Path,
+        typer.Option(
+            "--source",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+) -> None:
+    """Read-only reconstruction of one private literal source and every witness."""
+
+    try:
+        loaded = validate_literal_source(source)
+    except Exception as exc:
+        typer.echo(f"Literal source validation failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        "Literal source valid: "
+        f"version={loaded.source_manifest.benchmark_version}; "
+        f"purpose={loaded.source_manifest.purpose.value}; "
+        f"groups={len(loaded.item_bindings.bindings)}; items={len(loaded.items)}"
+    )
+
+
+@app.command("validate-literal-benchmark")
+def validate_literal_benchmark_command(
+    version: Annotated[
+        str | None,
+        typer.Option("--version", help="Canonical outcome candidate version."),
+    ] = None,
+    source: Annotated[
+        Path | None,
+        typer.Option(
+            "--source",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            help="Engineering source override.",
+        ),
+    ] = None,
+    candidate_manifest: Annotated[
+        Path | None,
+        typer.Option(
+            "--candidate-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="Engineering M2.1 candidate-manifest override.",
+        ),
+    ] = None,
+) -> None:
+    """Bind a validated M2.1 candidate into the M2.2 composite identity."""
+
+    try:
+        repository = find_repository_root(Path.cwd())
+        if version is not None:
+            if source is not None or candidate_manifest is not None:
+                raise ValueError("--version cannot be combined with explicit engineering paths")
+            safe_version = validate_benchmark_version(version)
+            selected_source = repository / "benchmarks" / "source" / safe_version
+            selected_candidate = (
+                resolve_candidate_version_path(repository, safe_version, BenchmarkPurpose.OUTCOME)
+                / "candidate_manifest.json"
+            )
+        else:
+            if source is None or candidate_manifest is None:
+                raise ValueError("Provide --version or both --source and --candidate-manifest")
+            selected_source = source
+            selected_candidate = candidate_manifest
+        composite = validate_literal_benchmark(
+            source_root=selected_source,
+            candidate_manifest_path=selected_candidate,
+            repository_root=repository,
+        )
+    except Exception as exc:
+        typer.echo(f"Literal benchmark validation failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        "Literal benchmark valid: "
+        f"version={composite.candidate_version}; purpose={composite.purpose}; "
+        f"groups={composite.semantic_group_count}; items={composite.source_item_count}; "
+        f"root={composite.literal_candidate_root_sha256}"
+    )
+
+
+@app.command("build-literal-review")
+def build_literal_review_command(
+    version: Annotated[
+        str | None,
+        typer.Option("--version", help="Canonical outcome candidate version."),
+    ] = None,
+    source: Annotated[
+        Path | None,
+        typer.Option(
+            "--source",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            help="Engineering source override.",
+        ),
+    ] = None,
+    output: Annotated[
+        Path,
+        typer.Option("--output", file_okay=False, help="New private review destination."),
+    ] = Path("reports/private"),
+) -> None:
+    """Build a write-once local owner-review bundle; never upload it."""
+
+    try:
+        repository = find_repository_root(Path.cwd())
+        if version is not None:
+            if source is not None:
+                raise ValueError("--version cannot be combined with --source")
+            safe_version = validate_benchmark_version(version)
+            selected_source = repository / "benchmarks" / "source" / safe_version
+            expected = (repository / "reports" / "private" / safe_version).resolve()
+            if output.resolve() != expected:
+                raise ValueError(f"Outcome review output must be canonical: {expected}")
+        elif source is not None:
+            selected_source = source
+        else:
+            raise ValueError("Provide --version or an engineering --source")
+        result = build_literal_review(source_root=selected_source, output_root=output)
+    except Exception as exc:
+        typer.echo(f"Literal review build failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(result.model_dump(mode="json"), sort_keys=True, separators=(",", ":")))
+
+
+@app.command("validate-literal-review")
+def validate_literal_review_command(
+    review: Annotated[
+        Path,
+        typer.Option(
+            "--review",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    source: Annotated[
+        Path,
+        typer.Option(
+            "--source",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+) -> None:
+    """Read back a private review bundle and verify every retained file."""
+
+    try:
+        manifest = validate_literal_review(review_root=review, source_root=source)
+    except Exception as exc:
+        typer.echo(f"Literal review validation failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        f"Literal review valid: version={manifest.candidate_version}; "
+        f"manifest={manifest.review_manifest_sha256}"
+    )
+
+
+@app.command("inspect-literal-item")
+def inspect_literal_item_command(
+    version: Annotated[str, typer.Option("--version", help="Private candidate version.")],
+    item_id: Annotated[str, typer.Option("--item-id", help="Exact private item ID.")],
+    render: Annotated[
+        bool,
+        typer.Option("--render", help="Write one deterministic private inspection PNG."),
+    ] = False,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", dir_okay=False, help="Required path when --render is used."),
+    ] = None,
+) -> None:
+    """Explicitly disclose one locally held private item for owner inspection."""
+
+    try:
+        if render != (output is not None):
+            raise ValueError("Use --render and --output together")
+        repository = find_repository_root(Path.cwd())
+        safe_version = validate_benchmark_version(version)
+        summary = inspect_literal_item(
+            source_root=repository / "benchmarks" / "source" / safe_version,
+            item_id=item_id,
+            render_path=output,
+        )
+    except Exception as exc:
+        typer.echo(f"Literal item inspection failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(summary, sort_keys=True, separators=(",", ":")))
 
 
 if __name__ == "__main__":
