@@ -101,3 +101,36 @@ jobs:
             exit 1
           fi
           uv run --frozen unfrozen audit-benchmark-git
+
+      - name: Literal benchmark engineering smoke
+        env:
+          CUDA_VISIBLE_DEVICES: ""
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+        run: |
+          literal_tmp="$(mktemp -d)"
+          trap 'rm -rf "$literal_tmp"' EXIT
+          source="$literal_tmp/source"
+          candidate="$literal_tmp/candidate"
+          review="$literal_tmp/review"
+          uv run --frozen unfrozen generate-literal-source \
+            --config configs/evaluation/m2_2_literal_smoke.yaml \
+            --source "$source"
+          uv run --frozen unfrozen validate-literal-source --source "$source"
+          uv run --frozen unfrozen build-benchmark \
+            --source "$source" \
+            --output "$candidate" \
+            --version engineering-literal-fixture-v1 \
+            --purpose engineering
+          uv run --frozen unfrozen validate-benchmark \
+            --manifest "$candidate/candidate_manifest.json"
+          uv run --frozen unfrozen validate-literal-benchmark \
+            --source "$source" \
+            --candidate-manifest "$candidate/candidate_manifest.json"
+          uv run --frozen unfrozen build-literal-review \
+            --source "$source" \
+            --output "$review"
+          uv run --frozen unfrozen validate-literal-review \
+            --source "$source" \
+            --review "$review"
+          uv run --frozen unfrozen audit-benchmark-git
