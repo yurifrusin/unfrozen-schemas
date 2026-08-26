@@ -83,7 +83,7 @@ def test_complete_literal_pipeline_and_regression_hashes(
         "5c6aa8878dc57eacfc5ef26f150c7674784c1a2269b78c9de55c32c84ddf084f"
     )
     assert review_manifest.review_manifest_sha256 == (
-        "ba538cb7ba7207b8f12eb9274657257cae0852c3ad7be2ff72ef8bb9e78183d6"
+        "4f021707f6683fe8a8942637aee4ebedb2724d8ad724b757a72231ce97aa984b"
     )
 
 

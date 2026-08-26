@@ -221,6 +221,11 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Added a tracked non-scientific engineering fixture using synthetic status-code wording. It is
   non-promotable and contains no real candidate prompt, target-domain item, model, scorer, or GPU
   dependency.
+- Pull request `#7` first ran CI at head
+  `f7696a5bb96c5cb275727649f8d3227d9a1ef954`. The test suite exposed an operating-system-dependent
+  PNG container hash in the review-manifest logical regression. The correction retains exact local
+  PNG artifact hashes for read-back while binding deterministic raw-pixel hashes in the logical
+  review identity, matching the existing rule that render-container metadata is non-scientific.
 - The real provisional candidate identity is `m2-2-literal-candidate-v1`, purpose `outcome`, with
   private ignored source, candidate, and review roots. Its generation is deliberately deferred until
   the tracked branch is final, pushed, clean, and CI-green.

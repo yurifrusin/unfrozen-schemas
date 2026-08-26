@@ -378,16 +378,18 @@ def build_literal_review(
     witness_by_group = {
         witness.semantic_group_id: witness for witness in loaded.witness_bundle.witnesses
     }
-    render_root = output / "renders"
+    render_pixel_hashes: dict[str, str] = {}
     for item in review_items:
         witness = witness_by_group[item.semantic_group_id]
         for suffix, state in (
             ("before", witness.initial_privileged_state),
             ("after", witness.actual_final_state),
         ):
-            pixels, _pixel_hash = render_raw_pixels(state, width=128, height=128)
+            pixels, pixel_hash = render_raw_pixels(state, width=128, height=128)
+            render_relative = f"renders/{item.semantic_group_id}-{suffix}.png"
+            render_pixel_hashes[render_relative] = pixel_hash
             save_png(
-                render_root / f"{item.semantic_group_id}-{suffix}.png",
+                output / render_relative,
                 pixels,
                 width=128,
                 height=128,
@@ -402,6 +404,7 @@ def build_literal_review(
         witness_bundle_sha256=composite.witness_bundle_sha256,
         literal_validation_report_sha256=composite.literal_validation_report_sha256,
         review_content_bundle_sha256=expected_content_hash,
+        render_pixel_hashes=dict(sorted(render_pixel_hashes.items())),
         artifacts=make_artifact_records(output, retained),
         review_manifest_sha256="0" * 64,
     )
@@ -508,6 +511,19 @@ def validate_literal_review(*, review_root: Path, source_root: Path) -> LiteralR
     content_hash = review_content_bundle_hash(review_content_records(loaded))
     if content_hash != manifest.review_content_bundle_sha256:
         raise ValueError("Review content does not match the private literal source")
+    witness_by_group = {
+        witness.semantic_group_id: witness for witness in loaded.witness_bundle.witnesses
+    }
+    expected_render_hashes: dict[str, str] = {}
+    for group_id, witness in sorted(witness_by_group.items()):
+        for suffix, state in (
+            ("before", witness.initial_privileged_state),
+            ("after", witness.actual_final_state),
+        ):
+            _pixels, pixel_hash = render_raw_pixels(state, width=128, height=128)
+            expected_render_hashes[f"renders/{group_id}-{suffix}.png"] = pixel_hash
+    if manifest.render_pixel_hashes != expected_render_hashes:
+        raise ValueError("Review render pixel identities do not reconstruct")
     observed_items = read_jsonl_models(
         root / REVIEW_ITEMS_FILE,
         LiteralReviewItem,

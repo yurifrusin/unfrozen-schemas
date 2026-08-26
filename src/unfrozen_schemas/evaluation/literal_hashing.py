@@ -145,9 +145,17 @@ def review_content_bundle_hash(records: Sequence[dict[str, object]]) -> str:
 
 
 def review_manifest_hash(value: LiteralReviewManifest) -> str:
+    payload = value.model_dump(mode="json", exclude={"review_manifest_sha256"})
+    # PNG container bytes may differ across operating systems even when the
+    # exact raw scientific inspection pixels agree. Exact PNG file hashes stay
+    # in the manifest for local read-back; the logical manifest root binds the
+    # stable raw-pixel identities and all non-render artifacts.
+    payload["artifacts"] = [
+        artifact for artifact in payload["artifacts"] if not str(artifact["path"]).endswith(".png")
+    ]
     return literal_hash(
         "unfrozen-schemas/literal/literal-review-manifest/v1",
-        value.model_dump(mode="json", exclude={"review_manifest_sha256"}),
+        payload,
     )
 
 

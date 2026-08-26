@@ -514,6 +514,7 @@ class LiteralReviewManifest(FrozenModel):
     witness_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
     literal_validation_report_sha256: str = Field(pattern=SHA256_PATTERN)
     review_content_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
+    render_pixel_hashes: dict[str, str]
     artifacts: tuple[ArtifactRecord, ...]
     review_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
 

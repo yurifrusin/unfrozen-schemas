@@ -195,6 +195,12 @@ validation, rights and ethics decisions, and M2.3-M2.6. Simulator agreement supp
 correctness for the declared toy physics; it does not establish naturalness, construct validity for
 humans, model learning, transfer, or any Phase I gate result.
 
+Cross-operating-system CI confirmed that PNG container bytes are not stable scientific identities.
+The review manifest therefore retains exact PNG hashes for local file-integrity checks but derives
+its portable logical root from deterministic raw RGB pixel hashes plus all non-render review
+artifacts. This preserves both byte-level review provenance and the prior scientific rule that an
+inspection container cannot define state identity.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>
