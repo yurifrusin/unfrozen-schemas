@@ -38,6 +38,7 @@ from unfrozen_schemas.evaluation.benchmark_models import (
     FrozenManifest,
     ImmutableReceipt,
     LifecycleState,
+    QuarantineScope,
     ResolvedBenchmarkConfig,
     ValidationReport,
 )
@@ -55,10 +56,12 @@ from unfrozen_schemas.evaluation.benchmark_validation import (
     FROZEN_MANIFEST_FILENAME,
     VALIDATION_CHECKS,
     coverage_summary,
+    create_quarantine_scope,
     ensure_lifecycle_transition,
     load_source_directory,
     public_manifest,
     validate_benchmark_manifest,
+    validate_quarantine_scope_content,
     verify_freeze_approval,
 )
 from unfrozen_schemas.provenance import (
@@ -71,8 +74,16 @@ from unfrozen_schemas.provenance import (
 )
 
 
-def _resolved_config(version: str, purpose: BenchmarkPurpose) -> ResolvedBenchmarkConfig:
-    return ResolvedBenchmarkConfig(benchmark_version=version, purpose=purpose)
+def _resolved_config(
+    version: str,
+    purpose: BenchmarkPurpose,
+    quarantine_scope_sha256: str | None = None,
+) -> ResolvedBenchmarkConfig:
+    return ResolvedBenchmarkConfig(
+        benchmark_version=version,
+        purpose=purpose,
+        quarantine_scope_sha256=quarantine_scope_sha256,
+    )
 
 
 def _basis(
@@ -216,6 +227,7 @@ def _failure_record(
     item_count: int,
     input_hashes: dict[str, str],
     lifecycle_before: LifecycleState,
+    quarantine_scope_sha256: str | None,
 ) -> str | None:
     try:
         ended_at = utc_now()
@@ -225,7 +237,8 @@ def _failure_record(
             engineering_only=purpose is BenchmarkPurpose.ENGINEERING,
             git=git,
             codex_spec_sha256=spec_hash,
-            resolved_configuration=_resolved_config(version, purpose),
+            quarantine_scope_sha256=quarantine_scope_sha256,
+            resolved_configuration=_resolved_config(version, purpose, quarantine_scope_sha256),
             input_hashes=dict(sorted(input_hashes.items())),
             lifecycle_state_before=lifecycle_before,
             lifecycle_state_after=None,
@@ -286,6 +299,7 @@ def build_benchmark(
     spec_hash = sha256_file(repository / "CODEX_SPEC.md")
     item_count = 0
     input_hashes: dict[str, str] = {}
+    quarantine_scope: QuarantineScope | None = None
     try:
         if output.exists():
             raise FileExistsError(f"PRIVATE candidate destination already exists: {output}")
@@ -293,14 +307,23 @@ def build_benchmark(
             source_directory, benchmark_version=version, purpose=purpose
         )
         item_count = len(snapshot.items)
-        input_hashes["source_snapshot_sha256"] = snapshot.source_snapshot_sha256
+        quarantine_scope = create_quarantine_scope(
+            snapshot.header.quarantine_scope,
+            repository,
+        )
+        input_hashes = {
+            "quarantine_scope_sha256": quarantine_scope.quarantine_scope_sha256,
+            "source_snapshot_sha256": snapshot.source_snapshot_sha256,
+        }
         records = tuple(derive_built_records(item) for item in snapshot.items)
         items = tuple(pair[0] for pair in records)
         answers = tuple(pair[1] for pair in records)
+        validate_quarantine_scope_content(purpose, items, quarantine_scope)
         hashes = bundle_hashes(
             benchmark_version=version,
             purpose=purpose.value,
             source_snapshot_sha256=snapshot.source_snapshot_sha256,
+            quarantine_scope_sha256=quarantine_scope.quarantine_scope_sha256,
             items=items,
             answers=answers,
         )
@@ -319,6 +342,7 @@ def build_benchmark(
             scientific_eligible=snapshot.header.scientific_eligible,
             promotable=snapshot.header.promotable,
             source_snapshot_sha256=snapshot.source_snapshot_sha256,
+            quarantine_scope_sha256=quarantine_scope.quarantine_scope_sha256,
             hashes=hashes,
         )
         public_hash = public_metadata_bundle_hash(public, coverage)
@@ -336,7 +360,7 @@ def build_benchmark(
             )
         output.parent.mkdir(parents=True, exist_ok=True)
         staging.mkdir(parents=False, exist_ok=False)
-        config = _resolved_config(version, purpose)
+        config = _resolved_config(version, purpose, quarantine_scope.quarantine_scope_sha256)
         paths = {
             "source_snapshot.json": staging / "source_snapshot.json",
             "items.jsonl": staging / "items.jsonl",
@@ -347,6 +371,7 @@ def build_benchmark(
             "validation_report.json": staging / "validation_report.json",
             "resource_budget.json": staging / "resource_budget.json",
             "operation_record.json": staging / "operation_record.json",
+            "quarantine_scope.json": staging / "quarantine_scope.json",
         }
         write_canonical_json(paths["source_snapshot.json"], snapshot)
         write_canonical_jsonl(paths["items.jsonl"], list(items))
@@ -354,6 +379,7 @@ def build_benchmark(
         write_canonical_json(paths["public_manifest.json"], public)
         write_canonical_json(paths["coverage_summary.json"], coverage)
         write_canonical_json(paths["resolved_benchmark_config.json"], config)
+        write_canonical_json(paths["quarantine_scope.json"], quarantine_scope)
         write_canonical_json(
             paths["validation_report.json"],
             ValidationReport(
@@ -389,6 +415,7 @@ def build_benchmark(
             engineering_only=snapshot.header.engineering_only,
             git=git,
             codex_spec_sha256=spec_hash,
+            quarantine_scope_sha256=quarantine_scope.quarantine_scope_sha256,
             resolved_configuration=config,
             input_hashes=input_hashes,
             lifecycle_state_before=LifecycleState.SOURCE,
@@ -414,6 +441,7 @@ def build_benchmark(
             promotable=snapshot.header.promotable,
             source_snapshot_sha256=snapshot.source_snapshot_sha256,
             public_metadata_bundle_sha256=public_hash,
+            quarantine_scope_sha256=quarantine_scope.quarantine_scope_sha256,
             codex_spec_sha256=spec_hash,
             git=git,
             item_count=len(items),
@@ -429,10 +457,10 @@ def build_benchmark(
         )
         manifest_path = staging / CANDIDATE_MANIFEST_FILENAME
         write_canonical_json(manifest_path, candidate)
-        validate_benchmark_manifest(manifest_path)
+        validate_benchmark_manifest(manifest_path, repository_root=repository)
         os.replace(staging, output)
         published_manifest = output / CANDIDATE_MANIFEST_FILENAME
-        validate_benchmark_manifest(published_manifest)
+        validate_benchmark_manifest(published_manifest, repository_root=repository)
         return BenchmarkOperationResult(
             operation_id=operation_id,
             dry_run=False,
@@ -466,6 +494,11 @@ def build_benchmark(
                 item_count=item_count,
                 input_hashes=input_hashes,
                 lifecycle_before=LifecycleState.SOURCE,
+                quarantine_scope_sha256=(
+                    quarantine_scope.quarantine_scope_sha256
+                    if quarantine_scope is not None
+                    else None
+                ),
             )
         raise BenchmarkOperationError(reason, failure_record_path=failure_path) from exc
 
@@ -480,14 +513,14 @@ def create_engineering_freeze_approval(
 ) -> FreezeApproval:
     """Create an exact-hash engineering approval that cannot authorise production data."""
 
-    candidate = validate_benchmark_manifest(candidate_manifest_path)
+    repository = (
+        find_repository_root(Path.cwd()) if repository_root is None else repository_root.resolve()
+    )
+    candidate = validate_benchmark_manifest(candidate_manifest_path, repository_root=repository)
     if not isinstance(candidate, CandidateManifest):
         raise ValueError("Engineering approval requires a PRIVATE candidate manifest")
     if candidate.benchmark_version != ENGINEERING_VERSION or not candidate.engineering_only:
         raise ValueError("Only the declared engineering lifecycle fixture may use this command")
-    repository = (
-        find_repository_root(Path.cwd()) if repository_root is None else repository_root.resolve()
-    )
     current_git = capture_git_state(repository)
     current_spec_hash = sha256_file(repository / "CODEX_SPEC.md")
     if current_git.dirty:
@@ -507,6 +540,7 @@ def create_engineering_freeze_approval(
         candidate_bundle_root_sha256=candidate.candidate_bundle_root_sha256,
         private_answer_bundle_sha256=candidate.private_answer_bundle_sha256,
         public_metadata_bundle_sha256=candidate.public_metadata_bundle_sha256,
+        quarantine_scope_sha256=candidate.quarantine_scope_sha256,
         codex_spec_sha256=candidate.codex_spec_sha256,
         git_commit=candidate.git.commit,
         rights_determination_reference=candidate.rights_determination_reference,
@@ -527,6 +561,60 @@ def create_engineering_freeze_approval(
     if freeze_approval_hash(restored) != restored.approval_sha256:
         raise RuntimeError("Persisted engineering freeze approval failed hash verification")
     return restored
+
+
+def _after_frozen_publication(_output: Path) -> None:
+    """Injection seam for the first instruction after atomic publication."""
+
+
+def _read_back_published_freeze(manifest_path: Path, repository_root: Path) -> None:
+    validate_benchmark_manifest(manifest_path, repository_root=repository_root)
+
+
+def _make_tree_writable(root: Path) -> None:
+    for path in (root, *root.rglob("*")):
+        with suppress(OSError):
+            path.chmod(path.stat().st_mode | stat.S_IWUSR)
+
+
+def _quarantine_failed_publication(output: Path, operation_id: str) -> Path | None:
+    """Move a published failure to an invalid name, deleting only as a last resort."""
+
+    if not output.exists():
+        return None
+    quarantine = output.parent / f".{output.name}.invalid-frozen-{operation_id}"
+    if quarantine.exists():
+        raise RuntimeError(f"Invalid-publication quarantine already exists: {quarantine}")
+    try:
+        os.replace(output, quarantine)
+        return quarantine
+    except Exception as replace_exc:
+        try:
+            shutil.move(str(output), str(quarantine))
+            return quarantine
+        except Exception as move_exc:
+            try:
+                _make_tree_writable(output)
+                shutil.rmtree(output)
+                return None
+            except Exception as remove_exc:
+                raise RuntimeError(
+                    "Unable to quarantine or remove failed FROZEN publication; "
+                    f"replace={replace_exc}; move={move_exc}; remove={remove_exc}"
+                ) from remove_exc
+
+
+def _apply_read_only_advisory(output: Path) -> tuple[str, ...]:
+    """Apply advisory permissions without changing scientific operation success."""
+
+    failures: list[str] = []
+    for path in output.rglob("*"):
+        if path.is_file():
+            try:
+                path.chmod(path.stat().st_mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+            except Exception as exc:
+                failures.append(f"{path.name}: {exc}")
+    return tuple(failures)
 
 
 def freeze_benchmark(
@@ -559,24 +647,29 @@ def freeze_benchmark(
     item_count = 0
     input_hashes: dict[str, str] = {}
     published_quarantine: Path | None = None
+    publication_cleanup_error: str | None = None
+    published = False
+    quarantine_scope_sha256: str | None = None
     try:
         if output.exists():
             raise FileExistsError(f"FROZEN benchmark destination already exists: {output}")
-        candidate = validate_benchmark_manifest(candidate_manifest_path)
+        candidate = validate_benchmark_manifest(candidate_manifest_path, repository_root=repository)
         if not isinstance(candidate, CandidateManifest):
             raise ValueError("freeze-benchmark requires a PRIVATE candidate manifest")
         version = candidate.benchmark_version
         purpose = candidate.purpose
         item_count = candidate.item_count
+        quarantine_scope_sha256 = candidate.quarantine_scope_sha256
         approval = read_canonical_model(approval_path, FreezeApproval)
         from unfrozen_schemas.evaluation.benchmark_validation import _load_candidate_payload
 
-        _, items, _ = _load_candidate_payload(candidate_manifest_path)
+        _, items, _ = _load_candidate_payload(candidate_manifest_path, repository_root=repository)
         verify_freeze_approval(candidate_manifest_path, candidate, items, approval)
         input_hashes = {
             "candidate_manifest_sha256": sha256_file(candidate_manifest_path),
             "candidate_bundle_root_sha256": candidate.candidate_bundle_root_sha256,
             "freeze_approval_sha256": approval.approval_sha256,
+            "quarantine_scope_sha256": candidate.quarantine_scope_sha256,
         }
         if git != candidate.git or spec_hash != candidate.codex_spec_sha256:
             raise ValueError(
@@ -608,6 +701,7 @@ def freeze_benchmark(
             candidate_manifest_sha256=sha256_file(candidate_manifest_path),
             candidate_bundle_root_sha256=candidate.candidate_bundle_root_sha256,
             freeze_approval_sha256=approval.approval_sha256,
+            quarantine_scope_sha256=candidate.quarantine_scope_sha256,
         )
         write_canonical_json(staging / "immutable_receipt.json", receipt)
         freeze_budget_path = staging / "freeze_resource_budget.json"
@@ -632,7 +726,10 @@ def freeze_benchmark(
             engineering_only=candidate.engineering_only,
             git=git,
             codex_spec_sha256=spec_hash,
-            resolved_configuration=_resolved_config(version, purpose),
+            quarantine_scope_sha256=candidate.quarantine_scope_sha256,
+            resolved_configuration=_resolved_config(
+                version, purpose, candidate.quarantine_scope_sha256
+            ),
             input_hashes=input_hashes,
             lifecycle_state_before=LifecycleState.PRIVATE,
             lifecycle_state_after=LifecycleState.FROZEN,
@@ -662,6 +759,7 @@ def freeze_benchmark(
             candidate_bundle_root_sha256=candidate.candidate_bundle_root_sha256,
             private_answer_bundle_sha256=candidate.private_answer_bundle_sha256,
             public_metadata_bundle_sha256=candidate.public_metadata_bundle_sha256,
+            quarantine_scope_sha256=candidate.quarantine_scope_sha256,
             freeze_approval_sha256=approval.approval_sha256,
             codex_spec_sha256=candidate.codex_spec_sha256,
             git_commit=candidate.git.commit,
@@ -688,18 +786,22 @@ def freeze_benchmark(
         )
         staging_manifest = staging / FROZEN_MANIFEST_FILENAME
         write_canonical_json(staging_manifest, frozen)
-        validate_benchmark_manifest(staging_manifest)
+        final_candidate = validate_benchmark_manifest(
+            candidate_manifest_path, repository_root=repository
+        )
+        if final_candidate != candidate:
+            raise ValueError("PRIVATE candidate changed during freeze construction")
+        _, final_items, _ = _load_candidate_payload(
+            candidate_manifest_path, repository_root=repository
+        )
+        verify_freeze_approval(candidate_manifest_path, candidate, final_items, approval)
+        validate_benchmark_manifest(staging_manifest, repository_root=repository)
         os.replace(staging, output)
+        published = True
+        _after_frozen_publication(output)
         published_manifest = output / FROZEN_MANIFEST_FILENAME
-        try:
-            validate_benchmark_manifest(published_manifest)
-        except Exception:
-            published_quarantine = output.parent / f".{output.name}.failed-{operation_id}"
-            os.replace(output, published_quarantine)
-            raise
-        for path in output.rglob("*"):
-            if path.is_file():
-                path.chmod(path.stat().st_mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+        _read_back_published_freeze(published_manifest, repository)
+        _apply_read_only_advisory(output)
         return BenchmarkOperationResult(
             operation_id=operation_id,
             dry_run=False,
@@ -712,9 +814,15 @@ def freeze_benchmark(
         )
     except Exception as exc:
         peak = _peak_and_restore(tracing_started_here, tracing_was_active)
+        original_reason = f"{type(exc).__name__}: {exc}"
+        if published and output.exists():
+            try:
+                published_quarantine = _quarantine_failed_publication(output, operation_id)
+            except Exception as cleanup_exc:
+                publication_cleanup_error = f"{type(cleanup_exc).__name__}: {cleanup_exc}"
         with suppress(Exception):
             _safe_remove_staging(staging, output.parent)
-        reason = f"{type(exc).__name__}: {exc}"
+        reason = original_reason
         failure_path = None
         if not dry_run:
             failure_path = _failure_record(
@@ -733,7 +841,12 @@ def freeze_benchmark(
                 item_count=item_count,
                 input_hashes=input_hashes,
                 lifecycle_before=LifecycleState.PRIVATE,
+                quarantine_scope_sha256=quarantine_scope_sha256,
             )
         if published_quarantine is not None:
             reason += f"; invalid publication quarantined at {published_quarantine.name}"
+        elif published and not output.exists():
+            reason += "; invalid publication removed after quarantine move failure"
+        if publication_cleanup_error is not None:
+            reason += f"; secondary publication cleanup failure: {publication_cleanup_error}"
         raise BenchmarkOperationError(reason, failure_record_path=failure_path) from exc

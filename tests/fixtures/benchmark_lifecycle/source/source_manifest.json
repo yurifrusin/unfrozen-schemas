@@ -13,5 +13,10 @@
   "rights_determination_reference": "not-applicable:engineering-fixture",
   "human_validation_reference": "not-applicable:engineering-fixture",
   "ethics_determination_reference": "not-applicable:engineering-fixture",
-  "production_prerequisites": null
+  "production_prerequisites": null,
+  "quarantine_scope": {
+    "schema_version": "1",
+    "mode": "engineering_empty",
+    "canonical_roots": []
+  }
 }

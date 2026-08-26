@@ -133,6 +133,26 @@ line-ending, and filesystem-order differences while retaining ordinary artifact 
 provenance. These are prospective integrity decisions, not benchmark-content or scientific-result
 decisions; all open content, validation, ethics, licensing, stack, and archive questions remain open.
 
+### 2026-08-26 — Quarantine must describe the comparison universe, not an operator action
+
+Pre-merge adversarial review showed that purpose isolation was incomplete when validation depended
+on optional repeated manifest arguments. It also showed that a fingerprint containing authored IDs
+could be evaded without changing the question shown to the evaluated model.
+
+M2.1 therefore treats the complete canonical manifest scan as an immutable candidate input. Exact
+displayed input and order-neutral content receive separate purpose-neutral identities: the first
+preserves option presentation and book eligibility, while the second detects copied content after
+ID replacement or option reversal. A changed comparison universe invalidates the candidate rather
+than relying on an operator to remember which manifests existed.
+
+The same review makes reverse-option variants a controlled transformation rather than a loose
+grouping convention. Pair members may differ only in enumerated presentation/source-record fields;
+prompt, annotations, validation, causal classification, correct stable answer, and substantive
+evidence remain equal. Complete recursive public isolation and exact independent provenance checks
+then protect those private semantics even against coordinated manifest edits. These are prospective
+integrity corrections before benchmark authoring or treatment results, not new benchmark content,
+scientific findings, or changes to the experimental design.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>

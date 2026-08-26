@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
@@ -17,6 +18,11 @@ SLUG_PATTERN = r"^[a-z0-9][a-z0-9._-]*$"
 ENGINEERING_VERSION = "engineering-benchmark-lifecycle-v1"
 PRODUCTION_VERSION = "v1_core"
 SELECTION_VERSION = "selection_probe_v1"
+CANONICAL_QUARANTINE_ROOTS: tuple[str, ...] = (
+    "benchmarks/frozen",
+    "benchmarks/private",
+    "benchmarks/selection",
+)
 
 
 class BenchmarkPurpose(StrEnum):
@@ -85,6 +91,87 @@ class AnswerProvenance(StrEnum):
     INDEPENDENT_HUMAN = "independent_human"
     INDEPENDENT_SIMULATOR = "independent_simulator"
     ENGINEERING_FIXTURE = "engineering_fixture"
+
+
+class QuarantineScopeMode(StrEnum):
+    """The only supported mandatory purpose-quarantine scope modes."""
+
+    CANONICAL_ROOT_SCAN = "canonical_root_scan"
+    ENGINEERING_EMPTY = "engineering_empty"
+
+
+class QuarantineScopeDeclaration(FrozenModel):
+    schema_version: Literal["1"] = "1"
+    mode: QuarantineScopeMode
+    canonical_roots: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def validate_scope_shape(self) -> QuarantineScopeDeclaration:
+        if tuple(sorted(self.canonical_roots)) != self.canonical_roots:
+            raise ValueError("Quarantine roots must use canonical sorted ordering")
+        if len(self.canonical_roots) != len(set(self.canonical_roots)):
+            raise ValueError("Quarantine roots must be unique")
+        if self.mode is QuarantineScopeMode.ENGINEERING_EMPTY:
+            if self.canonical_roots:
+                raise ValueError("An engineering-empty quarantine scope cannot declare roots")
+        elif self.canonical_roots != CANONICAL_QUARANTINE_ROOTS:
+            raise ValueError(
+                "A non-engineering quarantine scan must cover every canonical benchmark root"
+            )
+        return self
+
+
+class QuarantineManifestReference(FrozenModel):
+    path: str = Field(min_length=1)
+    file_sha256: str = Field(pattern=SHA256_PATTERN)
+    manifest_kind: Literal["benchmark_private_candidate", "benchmark_frozen"]
+    lifecycle_state: Literal[LifecycleState.PRIVATE, LifecycleState.FROZEN]
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
+    purpose: BenchmarkPurpose
+    candidate_bundle_root_sha256: str = Field(pattern=SHA256_PATTERN)
+    item_ids: tuple[str, ...]
+    exact_displayed_input_fingerprints: tuple[str, ...]
+    order_neutral_item_content_fingerprints: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def validate_canonical_reference(self) -> QuarantineManifestReference:
+        for field_name in (
+            "item_ids",
+            "exact_displayed_input_fingerprints",
+            "order_neutral_item_content_fingerprints",
+        ):
+            values = getattr(self, field_name)
+            if tuple(sorted(values)) != values or len(values) != len(set(values)):
+                raise ValueError(f"{field_name} must be sorted and unique")
+        for fingerprint in (
+            *self.exact_displayed_input_fingerprints,
+            *self.order_neutral_item_content_fingerprints,
+        ):
+            if not re.fullmatch(SHA256_PATTERN, fingerprint):
+                raise ValueError("Quarantine content fingerprints must be SHA-256 values")
+        return self
+
+
+class QuarantineScope(FrozenModel):
+    schema_version: Literal["1"] = "1"
+    scope_kind: Literal["benchmark_purpose_quarantine_scope"] = "benchmark_purpose_quarantine_scope"
+    mode: QuarantineScopeMode
+    canonical_roots: tuple[str, ...]
+    manifests: tuple[QuarantineManifestReference, ...]
+    quarantine_scope_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_canonical_scope(self) -> QuarantineScope:
+        declaration = QuarantineScopeDeclaration(
+            mode=self.mode,
+            canonical_roots=self.canonical_roots,
+        )
+        if declaration.mode is QuarantineScopeMode.ENGINEERING_EMPTY and self.manifests:
+            raise ValueError("Engineering-empty quarantine scope cannot contain manifests")
+        paths = tuple(reference.path for reference in self.manifests)
+        if tuple(sorted(paths)) != paths or len(paths) != len(set(paths)):
+            raise ValueError("Quarantine manifest references must use unique sorted paths")
+        return self
 
 
 class AnswerOption(FrozenModel):
@@ -250,8 +337,36 @@ class SourceItemRecord(FrozenModel):
                 raise ValueError("Engineering items require engineering-fixture provenance")
             if self.private_answer.answer_provenance is not AnswerProvenance.ENGINEERING_FIXTURE:
                 raise ValueError("Engineering answers require engineering-fixture provenance")
-        elif self.engineering_only:
-            raise ValueError("Non-engineering purposes cannot be marked engineering-only")
+            if (
+                self.provenance.rights_status is not RightsStatus.NOT_APPLICABLE_ENGINEERING
+                or self.provenance.ethics_status is not GovernanceStatus.NOT_APPLICABLE_ENGINEERING
+                or self.human_validation.validation_status
+                is not HumanValidationStatus.NOT_APPLICABLE_ENGINEERING
+                or self.human_validation.adjudication_status
+                is not AdjudicationStatus.NOT_APPLICABLE_ENGINEERING
+            ):
+                raise ValueError(
+                    "Engineering items require not-applicable engineering governance records"
+                )
+        else:
+            if self.engineering_only:
+                raise ValueError("Non-engineering purposes cannot be marked engineering-only")
+            if (
+                self.provenance.origin_classification is OriginClassification.ENGINEERING_FIXTURE
+                or self.private_answer.answer_provenance is AnswerProvenance.ENGINEERING_FIXTURE
+            ):
+                raise ValueError("Non-engineering items cannot use engineering-fixture provenance")
+            if (
+                self.provenance.rights_status is RightsStatus.NOT_APPLICABLE_ENGINEERING
+                or self.provenance.ethics_status is GovernanceStatus.NOT_APPLICABLE_ENGINEERING
+                or self.human_validation.validation_status
+                is HumanValidationStatus.NOT_APPLICABLE_ENGINEERING
+                or self.human_validation.adjudication_status
+                is AdjudicationStatus.NOT_APPLICABLE_ENGINEERING
+            ):
+                raise ValueError(
+                    "Non-engineering items cannot use engineering-only governance classifications"
+                )
         return self
 
 
@@ -280,6 +395,7 @@ class SourceManifest(FrozenModel):
     human_validation_reference: str = Field(min_length=1)
     ethics_determination_reference: str = Field(min_length=1)
     production_prerequisites: ProductionPrerequisites | None = None
+    quarantine_scope: QuarantineScopeDeclaration
 
     @model_validator(mode="after")
     def validate_reserved_version_and_purpose(self) -> SourceManifest:
@@ -291,8 +407,15 @@ class SourceManifest(FrozenModel):
                     "Engineering sources must be engineering-only, non-scientific, "
                     "and not promotable"
                 )
-        elif self.engineering_only:
-            raise ValueError("Non-engineering sources cannot be marked engineering-only")
+            if self.quarantine_scope.mode is not QuarantineScopeMode.ENGINEERING_EMPTY:
+                raise ValueError("Engineering sources require an explicit empty quarantine scope")
+        else:
+            if self.engineering_only:
+                raise ValueError("Non-engineering sources cannot be marked engineering-only")
+            if self.quarantine_scope.mode is not QuarantineScopeMode.CANONICAL_ROOT_SCAN:
+                raise ValueError(
+                    "Non-engineering sources require the mandatory canonical quarantine scan"
+                )
         if (
             self.benchmark_version == PRODUCTION_VERSION
             and self.purpose is not BenchmarkPurpose.OUTCOME
@@ -311,7 +434,7 @@ class SourceManifest(FrozenModel):
 class SourceSnapshotHeader(FrozenModel):
     schema_version: Literal["1"] = "1"
     source_format: Literal["canonical-jsonl-v1"] = "canonical-jsonl-v1"
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     purpose: BenchmarkPurpose
     engineering_only: bool
     scientific_eligible: bool
@@ -321,6 +444,7 @@ class SourceSnapshotHeader(FrozenModel):
     human_validation_reference: str
     ethics_determination_reference: str
     production_prerequisites: ProductionPrerequisites | None
+    quarantine_scope: QuarantineScopeDeclaration
 
 
 class SourceSnapshot(FrozenModel):
@@ -352,13 +476,13 @@ class BuiltBenchmarkItem(FrozenModel):
     item_revision: int = Field(ge=1)
     purpose: BenchmarkPurpose
     identity_purpose: BenchmarkPurpose
-    task_family_slug: str
+    task_family_slug: str = Field(min_length=1, pattern=SLUG_PATTERN)
     transfer_level: int | None
     schema_designation: SchemaDesignation
-    target_domain_family: str
-    source_mechanism_family: str
-    prompt_template_id: str
-    partition_id: str
+    target_domain_family: str = Field(min_length=1, pattern=SLUG_PATTERN)
+    source_mechanism_family: str = Field(min_length=1, pattern=SLUG_PATTERN)
+    prompt_template_id: str = Field(min_length=1, pattern=SLUG_PATTERN)
+    partition_id: str = Field(min_length=1, pattern=SLUG_PATTERN)
     release_status: Literal["private_candidate"] = "private_candidate"
     engineering_only: bool
     scientific_eligible: bool
@@ -368,6 +492,8 @@ class BuiltBenchmarkItem(FrozenModel):
     provenance: ProvenanceRights
     human_validation: HumanValidationMetadata
     model_visible_sha256: str = Field(pattern=SHA256_PATTERN)
+    exact_displayed_input_fingerprint_sha256: str = Field(pattern=SHA256_PATTERN)
+    order_neutral_item_content_fingerprint_sha256: str = Field(pattern=SHA256_PATTERN)
     annotation_metadata_sha256: str = Field(pattern=SHA256_PATTERN)
     complete_private_item_record_sha256: str = Field(pattern=SHA256_PATTERN)
 
@@ -376,8 +502,9 @@ class ResolvedBenchmarkConfig(FrozenModel):
     schema_version: Literal["1"] = "1"
     source_format: Literal["canonical-jsonl-v1"] = "canonical-jsonl-v1"
     built_item_format: Literal["canonical-jsonl-v1"] = "canonical-jsonl-v1"
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     purpose: BenchmarkPurpose
+    quarantine_scope_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     source_manifest_filename: Literal["source_manifest.json"] = "source_manifest.json"
     source_items_filename: Literal["items.jsonl"] = "items.jsonl"
     candidate_items_filename: Literal["items.jsonl"] = "items.jsonl"
@@ -390,7 +517,7 @@ class ResolvedBenchmarkConfig(FrozenModel):
 
 class CoverageSummary(FrozenModel):
     schema_version: Literal["1"] = "1"
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     purpose: BenchmarkPurpose
     item_count: int
     task_family_counts: dict[str, int]
@@ -411,7 +538,7 @@ class PublicManifest(FrozenModel):
     schema_version: Literal["1"] = "1"
     manifest_kind: Literal["benchmark_public_metadata"] = "benchmark_public_metadata"
     lifecycle_state: Literal[LifecycleState.PRIVATE] = LifecycleState.PRIVATE
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     purpose: BenchmarkPurpose
     engineering_only: bool
     scientific_eligible: bool
@@ -426,6 +553,7 @@ class PublicManifest(FrozenModel):
     annotation_metadata_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
     candidate_bundle_root_sha256: str = Field(pattern=SHA256_PATTERN)
     private_answer_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
+    quarantine_scope_sha256: str = Field(pattern=SHA256_PATTERN)
     coverage_summary_path: Literal["coverage_summary.json"] = "coverage_summary.json"
     benchmark_card_path: Literal["docs/benchmark-card.md"] = "docs/benchmark-card.md"
     contains_prompts_or_options: Literal[False] = False
@@ -436,7 +564,7 @@ class PublicManifest(FrozenModel):
 class ValidationReport(FrozenModel):
     schema_version: Literal["1"] = "1"
     report_kind: Literal["benchmark_validation"] = "benchmark_validation"
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     lifecycle_state: LifecycleState
     purpose: BenchmarkPurpose
     status: Literal["PASS"] = "PASS"
@@ -453,11 +581,12 @@ class BenchmarkOperationRecord(FrozenModel):
     scientific_result: Literal[False] = False
     git: GitState
     codex_spec_sha256: str = Field(pattern=SHA256_PATTERN)
+    quarantine_scope_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     resolved_configuration: ResolvedBenchmarkConfig
     input_hashes: dict[str, str]
     lifecycle_state_before: LifecycleState
     lifecycle_state_after: LifecycleState | None
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     purpose: BenchmarkPurpose
     item_count: int
     artifacts: tuple[ArtifactRecord, ...]
@@ -485,6 +614,8 @@ class BenchmarkOperationRecord(FrozenModel):
             raise ValueError("Failed benchmark operations require the original failure reason")
         if self.status == "COMPLETED" and self.failure_reason is not None:
             raise ValueError("Completed benchmark operations cannot contain a failure reason")
+        if self.status == "COMPLETED" and self.quarantine_scope_sha256 is None:
+            raise ValueError("Completed benchmark operations require a quarantine-scope identity")
         return self
 
 
@@ -492,7 +623,7 @@ class CandidateManifest(FrozenModel):
     schema_version: Literal["1"] = "1"
     manifest_kind: Literal["benchmark_private_candidate"] = "benchmark_private_candidate"
     lifecycle_state: Literal[LifecycleState.PRIVATE] = LifecycleState.PRIVATE
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     purpose: BenchmarkPurpose
     engineering_only: bool
     scientific_eligible: bool
@@ -503,6 +634,7 @@ class CandidateManifest(FrozenModel):
     private_answer_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
     candidate_bundle_root_sha256: str = Field(pattern=SHA256_PATTERN)
     public_metadata_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
+    quarantine_scope_sha256: str = Field(pattern=SHA256_PATTERN)
     codex_spec_sha256: str = Field(pattern=SHA256_PATTERN)
     git: GitState
     item_count: int = Field(ge=1)
@@ -518,6 +650,7 @@ class CandidateManifest(FrozenModel):
     validation_report_path: Literal["validation_report.json"] = "validation_report.json"
     resource_budget_path: Literal["resource_budget.json"] = "resource_budget.json"
     operation_record_path: Literal["operation_record.json"] = "operation_record.json"
+    quarantine_scope_path: Literal["quarantine_scope.json"] = "quarantine_scope.json"
     production_prerequisites: ProductionPrerequisites | None
     rights_determination_reference: str
     human_validation_reference: str
@@ -539,13 +672,14 @@ class FreezeApproval(FrozenModel):
     schema_version: Literal["1"] = "1"
     artifact_kind: Literal["benchmark_freeze_approval"] = "benchmark_freeze_approval"
     approval_class: Literal["engineering_fixture", "production"]
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     benchmark_purpose: BenchmarkPurpose
     engineering_only: bool
     candidate_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
     candidate_bundle_root_sha256: str = Field(pattern=SHA256_PATTERN)
     private_answer_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
     public_metadata_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
+    quarantine_scope_sha256: str = Field(pattern=SHA256_PATTERN)
     codex_spec_sha256: str = Field(pattern=SHA256_PATTERN)
     git_commit: str = Field(pattern=r"^[a-f0-9]{40}$")
     git_dirty: Literal[False] = False
@@ -589,12 +723,13 @@ class FreezeApproval(FrozenModel):
 class ImmutableReceipt(FrozenModel):
     schema_version: Literal["1"] = "1"
     receipt_kind: Literal["benchmark_write_once_receipt"] = "benchmark_write_once_receipt"
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     purpose: BenchmarkPurpose
     lifecycle_state: Literal[LifecycleState.FROZEN] = LifecycleState.FROZEN
     candidate_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
     candidate_bundle_root_sha256: str = Field(pattern=SHA256_PATTERN)
     freeze_approval_sha256: str = Field(pattern=SHA256_PATTERN)
+    quarantine_scope_sha256: str = Field(pattern=SHA256_PATTERN)
     write_once: Literal[True] = True
     filesystem_read_only_is_advisory: Literal[True] = True
 
@@ -603,7 +738,7 @@ class FrozenManifest(FrozenModel):
     schema_version: Literal["1"] = "1"
     manifest_kind: Literal["benchmark_frozen"] = "benchmark_frozen"
     lifecycle_state: Literal[LifecycleState.FROZEN] = LifecycleState.FROZEN
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     purpose: BenchmarkPurpose
     engineering_only: bool
     scientific_eligible: bool
@@ -613,6 +748,7 @@ class FrozenManifest(FrozenModel):
     candidate_bundle_root_sha256: str = Field(pattern=SHA256_PATTERN)
     private_answer_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
     public_metadata_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
+    quarantine_scope_sha256: str = Field(pattern=SHA256_PATTERN)
     freeze_approval_sha256: str = Field(pattern=SHA256_PATTERN)
     codex_spec_sha256: str = Field(pattern=SHA256_PATTERN)
     git_commit: str = Field(pattern=r"^[a-f0-9]{40}$")
@@ -628,7 +764,7 @@ class FrozenManifest(FrozenModel):
 class BenchmarkOperationResult(FrozenModel):
     operation_id: str
     dry_run: bool
-    benchmark_version: str
+    benchmark_version: str = Field(min_length=1, pattern=SLUG_PATTERN)
     purpose: BenchmarkPurpose
     manifest_path: str | None
     candidate_bundle_root_sha256: str

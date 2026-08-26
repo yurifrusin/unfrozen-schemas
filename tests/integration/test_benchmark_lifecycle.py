@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -10,9 +12,13 @@ from typing import Any, cast
 import pytest
 from typer.testing import CliRunner
 
+import unfrozen_schemas.evaluation.benchmark_lifecycle as benchmark_lifecycle_module
 from unfrozen_schemas.cli import app
 from unfrozen_schemas.config import sha256_file
-from unfrozen_schemas.evaluation.benchmark_hashing import freeze_approval_hash
+from unfrozen_schemas.evaluation.benchmark_hashing import (
+    freeze_approval_hash,
+    frozen_manifest_hash,
+)
 from unfrozen_schemas.evaluation.benchmark_lifecycle import (
     build_benchmark,
     create_engineering_freeze_approval,
@@ -20,13 +26,17 @@ from unfrozen_schemas.evaluation.benchmark_lifecycle import (
 )
 from unfrozen_schemas.evaluation.benchmark_models import (
     BenchmarkOperationError,
+    BenchmarkOperationRecord,
     BenchmarkPurpose,
     CandidateManifest,
     FreezeApproval,
     FrozenManifest,
     ProductionPrerequisites,
 )
-from unfrozen_schemas.evaluation.benchmark_persistence import write_canonical_json
+from unfrozen_schemas.evaluation.benchmark_persistence import (
+    read_canonical_model,
+    write_canonical_json,
+)
 from unfrozen_schemas.evaluation.benchmark_validation import validate_benchmark_manifest
 
 
@@ -87,6 +97,172 @@ def test_mutated_frozen_artifact_is_rejected(
     item_path.write_bytes(item_path.read_bytes() + b" ")
     with pytest.raises(ValueError, match=r"Artifact (size|SHA-256) mismatch"):
         validate_benchmark_manifest(Path(result.manifest_path))
+
+
+def _engineering_approval(
+    tmp_path: Path,
+    built_candidate: tuple[Path, CandidateManifest, Path],
+) -> tuple[Path, Path, Path]:
+    candidate_path, _, repository = built_candidate
+    approval_path = tmp_path / "atomic-approval.json"
+    create_engineering_freeze_approval(
+        candidate_manifest_path=candidate_path,
+        output_path=approval_path,
+        signer="engineering-validator-001",
+        repository_root=repository,
+    )
+    return candidate_path, approval_path, repository
+
+
+def _refresh_frozen_artifact(frozen_manifest_path: Path, relative: str) -> None:
+    manifest = read_canonical_model(frozen_manifest_path, FrozenManifest)
+    artifact_path = frozen_manifest_path.parent / relative
+    records = tuple(
+        record.model_copy(
+            update={
+                "sha256": sha256_file(artifact_path),
+                "size_bytes": artifact_path.stat().st_size,
+            }
+        )
+        if record.path == relative
+        else record
+        for record in manifest.artifacts
+    )
+    provisional = manifest.model_copy(
+        update={"artifacts": records, "frozen_manifest_sha256": "0" * 64}
+    )
+    changed = provisional.model_copy(
+        update={"frozen_manifest_sha256": frozen_manifest_hash(provisional)}
+    )
+    write_canonical_json(frozen_manifest_path, changed)
+
+
+def test_chmod_failure_is_advisory_and_keeps_valid_frozen_output(
+    tmp_path: Path,
+    built_candidate: tuple[Path, CandidateManifest, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_path, approval_path, repository = _engineering_approval(tmp_path, built_candidate)
+
+    def fail_chmod(_path: Path, _mode: int) -> None:
+        raise OSError("injected advisory chmod failure")
+
+    monkeypatch.setattr(Path, "chmod", fail_chmod)
+    output = tmp_path / "chmod-frozen"
+    result = freeze_benchmark(
+        candidate_manifest_path=candidate_path,
+        approval_path=approval_path,
+        output_directory=output,
+        repository_root=repository,
+    )
+    assert result.manifest_path is not None
+    assert isinstance(validate_benchmark_manifest(Path(result.manifest_path)), FrozenManifest)
+
+
+@pytest.mark.parametrize(
+    "injection_point",
+    ("immediately_after_replace", "final_readback"),
+)
+def test_post_publication_failure_moves_output_to_invalid_quarantine(
+    tmp_path: Path,
+    built_candidate: tuple[Path, CandidateManifest, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    injection_point: str,
+) -> None:
+    candidate_path, approval_path, repository = _engineering_approval(tmp_path, built_candidate)
+    if injection_point == "immediately_after_replace":
+        monkeypatch.setattr(
+            benchmark_lifecycle_module,
+            "_after_frozen_publication",
+            lambda _output: (_ for _ in ()).throw(RuntimeError("injected after replace")),
+        )
+    else:
+        monkeypatch.setattr(
+            benchmark_lifecycle_module,
+            "_read_back_published_freeze",
+            lambda _manifest, _repository: (_ for _ in ()).throw(
+                RuntimeError("injected final readback")
+            ),
+        )
+    output = tmp_path / f"failed-{injection_point}"
+    with pytest.raises(BenchmarkOperationError, match="injected") as raised:
+        freeze_benchmark(
+            candidate_manifest_path=candidate_path,
+            approval_path=approval_path,
+            output_directory=output,
+            repository_root=repository,
+        )
+    assert str(raised.value).startswith("RuntimeError: injected")
+    assert not output.exists()
+    retained = list(tmp_path.glob(f".{output.name}.invalid-frozen-*"))
+    assert len(retained) == 1
+    assert (retained[0] / "frozen_manifest.json").is_file()
+
+
+def test_quarantine_move_failure_removes_publication_without_masking_original_error(
+    tmp_path: Path,
+    built_candidate: tuple[Path, CandidateManifest, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_path, approval_path, repository = _engineering_approval(tmp_path, built_candidate)
+    output = tmp_path / "quarantine-move-failure"
+    real_replace = os.replace
+
+    def selective_replace(source: str | Path, destination: str | Path) -> None:
+        if Path(source) == output:
+            raise OSError("injected quarantine replace failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", selective_replace)
+    monkeypatch.setattr(
+        shutil,
+        "move",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("injected quarantine move failure")
+        ),
+    )
+    monkeypatch.setattr(
+        benchmark_lifecycle_module,
+        "_after_frozen_publication",
+        lambda _output: (_ for _ in ()).throw(RuntimeError("primary published failure")),
+    )
+    with pytest.raises(BenchmarkOperationError) as raised:
+        freeze_benchmark(
+            candidate_manifest_path=candidate_path,
+            approval_path=approval_path,
+            output_directory=output,
+            repository_root=repository,
+        )
+    assert str(raised.value).startswith("RuntimeError: primary published failure")
+    assert not output.exists()
+    assert not list(tmp_path.glob(f".{output.name}.invalid-frozen-*"))
+
+
+def test_coordinated_freeze_operation_mutation_is_semantically_rejected(
+    tmp_path: Path,
+    built_candidate: tuple[Path, CandidateManifest, Path],
+) -> None:
+    candidate_path, approval_path, repository = _engineering_approval(tmp_path, built_candidate)
+    output = tmp_path / "mutated-freeze-operation"
+    result = freeze_benchmark(
+        candidate_manifest_path=candidate_path,
+        approval_path=approval_path,
+        output_directory=output,
+        repository_root=repository,
+    )
+    assert result.manifest_path is not None
+    operation_path = output / "freeze_operation.json"
+    operation_path.chmod(0o644)
+    operation = read_canonical_model(operation_path, BenchmarkOperationRecord)
+    changed = operation.model_copy(
+        update={"input_hashes": {**operation.input_hashes, "unexpected": "f" * 64}}
+    )
+    write_canonical_json(operation_path, changed)
+    frozen_manifest_path = Path(result.manifest_path)
+    frozen_manifest_path.chmod(0o644)
+    _refresh_frozen_artifact(frozen_manifest_path, "freeze_operation.json")
+    with pytest.raises(ValueError, match="Freeze operation provenance"):
+        validate_benchmark_manifest(frozen_manifest_path)
 
 
 @pytest.mark.parametrize(
@@ -151,7 +327,7 @@ def test_identical_source_rebuild_has_identical_logical_identities(
 
 def _production_source(tmp_path: Path, *, unresolved_rights: bool = False) -> Path:
     source = tmp_path / "production-source"
-    source.mkdir()
+    source.mkdir(parents=True)
     fixture_root = Path("tests/fixtures/benchmark_lifecycle/source")
     item_lines = fixture_root.joinpath("items.jsonl").read_text(encoding="utf-8").splitlines()
     converted: list[dict[str, Any]] = []
@@ -212,10 +388,61 @@ def _production_source(tmp_path: Path, *, unresolved_rights: bool = False) -> Pa
         "human_validation_reference": "human-validation:test-only",
         "ethics_determination_reference": "ethics:test-only",
         "production_prerequisites": prereq,
+        "quarantine_scope": {
+            "schema_version": "1",
+            "mode": "canonical_root_scan",
+            "canonical_roots": [
+                "benchmarks/frozen",
+                "benchmarks/private",
+                "benchmarks/selection",
+            ],
+        },
     }
     source.joinpath("source_manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8", newline="\n"
     )
+    source.joinpath("items.jsonl").write_text(
+        "".join(
+            json.dumps(item, sort_keys=True, separators=(",", ":")) + "\n" for item in converted
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    return source
+
+
+def _renamed_selection_copy_source(tmp_path: Path) -> Path:
+    source = _production_source(tmp_path)
+    manifest_path = source / "source_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["benchmark_version"] = "selection-copy-test-v1"
+    manifest["purpose"] = "selection"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8", newline="\n")
+    converted: list[dict[str, Any]] = []
+    for index, line in enumerate(
+        source.joinpath("items.jsonl").read_text(encoding="utf-8").splitlines()
+    ):
+        item = cast(dict[str, Any], json.loads(line))
+        item_id = f"selection-all-identities-renamed-{index + 1}"
+        item["item_id"] = item_id
+        item["purpose"] = "selection"
+        item["identity_purpose"] = "selection"
+        item["provenance"]["created_from_source_record"] = item_id
+        item["model_visible"]["reverse_pair_id"] = "selection-renamed-pair"
+        item["model_visible"]["variant_id"] = f"selection-renamed-variant-{index + 1}"
+        option_mapping = {
+            "opt-k7": "selection-option-k7",
+            "opt-m4": "selection-option-m4",
+        }
+        for option in item["model_visible"]["ordered_options"]:
+            option["option_id"] = option_mapping[option["option_id"]]
+        item["model_visible"]["option_permutation"] = [
+            option["option_id"] for option in item["model_visible"]["ordered_options"]
+        ]
+        item["private_answer"]["correct_option_id"] = option_mapping[
+            item["private_answer"]["correct_option_id"]
+        ]
+        converted.append(item)
     source.joinpath("items.jsonl").write_text(
         "".join(
             json.dumps(item, sort_keys=True, separators=(",", ":")) + "\n" for item in converted
@@ -237,6 +464,7 @@ def _production_approval(candidate_path: Path, candidate: CandidateManifest) -> 
         candidate_bundle_root_sha256=candidate.candidate_bundle_root_sha256,
         private_answer_bundle_sha256=candidate.private_answer_bundle_sha256,
         public_metadata_bundle_sha256=candidate.public_metadata_bundle_sha256,
+        quarantine_scope_sha256=candidate.quarantine_scope_sha256,
         codex_spec_sha256=candidate.codex_spec_sha256,
         git_commit=candidate.git.commit,
         rights_determination_reference=candidate.rights_determination_reference,
@@ -268,7 +496,9 @@ def test_v1_core_freeze_is_refused_even_with_structural_prerequisite_placeholder
     )
     assert build.manifest_path is not None
     candidate_path = Path(build.manifest_path)
-    candidate = validate_benchmark_manifest(candidate_path)
+    candidate = validate_benchmark_manifest(
+        candidate_path, repository_root=clean_benchmark_repository
+    )
     assert isinstance(candidate, CandidateManifest)
     approval = _production_approval(candidate_path, candidate)
     approval_path = tmp_path / "v1-approval.json"
@@ -295,7 +525,9 @@ def test_production_freeze_fails_first_on_unresolved_rights(
     )
     assert build.manifest_path is not None
     candidate_path = Path(build.manifest_path)
-    candidate = validate_benchmark_manifest(candidate_path)
+    candidate = validate_benchmark_manifest(
+        candidate_path, repository_root=clean_benchmark_repository
+    )
     assert isinstance(candidate, CandidateManifest)
     approval_path = tmp_path / "unresolved-approval.json"
     write_canonical_json(approval_path, _production_approval(candidate_path, candidate))
@@ -304,6 +536,88 @@ def test_production_freeze_fails_first_on_unresolved_rights(
             candidate_manifest_path=candidate_path,
             approval_path=approval_path,
             output_directory=tmp_path / "unresolved-frozen",
+            repository_root=clean_benchmark_repository,
+        )
+
+
+def test_non_engineering_build_fails_when_a_mandatory_quarantine_root_is_missing(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+) -> None:
+    clean_benchmark_repository.joinpath("benchmarks/selection").rmdir()
+    source = _production_source(tmp_path)
+    with pytest.raises(BenchmarkOperationError, match="Quarantine root is missing"):
+        build_benchmark(
+            source_directory=source,
+            output_directory=tmp_path / "missing-root-candidate",
+            version="v1_core",
+            purpose=BenchmarkPurpose.OUTCOME,
+            repository_root=clean_benchmark_repository,
+        )
+
+
+def test_added_manifest_makes_candidate_and_approval_stale(
+    tmp_path: Path,
+    engineering_source: Path,
+    clean_benchmark_repository: Path,
+) -> None:
+    source = _production_source(tmp_path)
+    result = build_benchmark(
+        source_directory=source,
+        output_directory=tmp_path / "scoped-outcome-candidate",
+        version="v1_core",
+        purpose=BenchmarkPurpose.OUTCOME,
+        repository_root=clean_benchmark_repository,
+    )
+    assert result.manifest_path is not None
+    candidate_path = Path(result.manifest_path)
+    candidate = validate_benchmark_manifest(
+        candidate_path, repository_root=clean_benchmark_repository
+    )
+    assert isinstance(candidate, CandidateManifest)
+    approval_path = tmp_path / "stale-production-approval.json"
+    write_canonical_json(approval_path, _production_approval(candidate_path, candidate))
+    build_benchmark(
+        source_directory=engineering_source,
+        output_directory=(
+            clean_benchmark_repository / "benchmarks/private/late-engineering-manifest"
+        ),
+        version="engineering-benchmark-lifecycle-v1",
+        purpose=BenchmarkPurpose.ENGINEERING,
+        repository_root=clean_benchmark_repository,
+    )
+    with pytest.raises(ValueError, match="quarantine scope is stale"):
+        validate_benchmark_manifest(candidate_path, repository_root=clean_benchmark_repository)
+    with pytest.raises(BenchmarkOperationError, match="quarantine scope is stale"):
+        freeze_benchmark(
+            candidate_manifest_path=candidate_path,
+            approval_path=approval_path,
+            output_directory=tmp_path / "stale-frozen",
+            repository_root=clean_benchmark_repository,
+        )
+
+
+def test_mandatory_scope_rejects_selection_copy_after_all_ids_are_renamed(
+    tmp_path: Path,
+    clean_benchmark_repository: Path,
+) -> None:
+    outcome_source = _production_source(tmp_path / "outcome")
+    build_benchmark(
+        source_directory=outcome_source,
+        output_directory=(
+            clean_benchmark_repository / "benchmarks/private/existing-outcome-candidate"
+        ),
+        version="v1_core",
+        purpose=BenchmarkPurpose.OUTCOME,
+        repository_root=clean_benchmark_repository,
+    )
+    selection_source = _renamed_selection_copy_source(tmp_path / "selection")
+    with pytest.raises(BenchmarkOperationError, match="Exact displayed model input"):
+        build_benchmark(
+            source_directory=selection_source,
+            output_directory=tmp_path / "prohibited-selection-copy",
+            version="selection-copy-test-v1",
+            purpose=BenchmarkPurpose.SELECTION,
             repository_root=clean_benchmark_repository,
         )
 

@@ -19,7 +19,11 @@
 - **M2.1 — benchmark schema and lifecycle:** work in progress on a dedicated branch. Implements
   purpose quarantine, strict item/answer/approval records, distinct hash domains, answer-isolated
   deterministic build, independent validation, governed write-once engineering freeze, tests, and
-  documentation. It contains no real benchmark item.
+  documentation. The pre-merge correction makes quarantine a mandatory hash-bound canonical-root
+  scan; adds purpose-neutral exact-display and order-neutral fingerprints; freezes the reverse-pair
+  equivalence contract; completes recursive public isolation and cross-record consistency; makes
+  post-publication failure atomic; and replaces version-path and tracked-file heuristics with
+  fail-closed validation. It contains no real benchmark item.
 - **M2.2 — literal/counterfactual families:** pending.
 - **M2.3 — abstract/metaphorical families:** pending.
 - **M2.4 — scoring, option order, leakage, retention:** pending.
@@ -55,17 +59,24 @@
 
 ## M2.1 engineering-fixture regression identities
 
-- Source snapshot: `983cfab2c885718e828eec131f3c10b52a29608f10e16344ab1c37245acede54`.
-- Representative model-visible item:
-  `2c0e44064cd0168b8d7bf93b21a28274f17e8df388b48b643d4b9d48ac9165e5`.
-- Representative private answer:
-  `2410ad382661e343aa9866d616a300d9d2d5b55a412e54f03d866a7a453f7628`.
-- Candidate bundle root:
-  `bf9a798de640766ae410f683f01edd8e51dd7e3ba991b650e261094225b66e32`.
-- Public metadata bundle:
-  `1c12719cd84e110ffc4494d3f3c4b2a836c2134232c47549798924b293292567`.
-- Frozen-manifest logical-domain regression:
-  `e52723e10f03bf446ec527c6045b2796e6042211db6dd8654b14f4519a9b0935`.
+| Identity | Previous | Corrected | Reason |
+|---|---|---|---|
+| Source snapshot | `983cfab2c885718e828eec131f3c10b52a29608f10e16344ab1c37245acede54` | `ad8d51beea8582ab88533d928e3fee91a7449f0424518da4e0360cfb9fa078e3` | The source header now binds the mandatory quarantine declaration. |
+| Representative model-visible item | `2c0e44064cd0168b8d7bf93b21a28274f17e8df388b48b643d4b9d48ac9165e5` | unchanged | Its purpose-bound visible-item domain did not change. |
+| Representative private answer | `2410ad382661e343aa9866d616a300d9d2d5b55a412e54f03d866a7a453f7628` | unchanged | The private-answer record domain did not change. |
+| Private-answer bundle | `06347cb6ccea1e406efb8a5e5fa5c3336e1749f0836ebd1e685f08649c6eac0e` | unchanged | Neither private answers nor their bundle framing changed. |
+| Candidate bundle root | `bf9a798de640766ae410f683f01edd8e51dd7e3ba991b650e261094225b66e32` | `4cad3f2bc0d4696906ad8f1653350c59d73aeac88ec6db2473e809a349025243` | It now binds the quarantine scope and built items contain the two new content fingerprints. |
+| Public metadata bundle | `1c12719cd84e110ffc4494d3f3c4b2a836c2134232c47549798924b293292567` | `fe5e99d452c7002aee635d7ef93dcbe3548d23244b8a1579957ac956b2768496` | Safe public metadata now binds the quarantine-scope identity and corrected candidate root. |
+| Frozen-manifest logical-domain regression | `e52723e10f03bf446ec527c6045b2796e6042211db6dd8654b14f4519a9b0935` | `4055288eff1e25ed5bcd710e8ad2922b62175dc0aea4a6b994807127a6008a41` | The frozen manifest now binds the quarantine-scope identity. |
+
+New identities have no obsolete predecessor:
+
+- Engineering-empty quarantine scope:
+  `a06591a6eb3808f687f2a9f3ac9d5315cf0bef9d653714f30158e3ff65b8ac07`.
+- Representative exact displayed-input fingerprint:
+  `01b00a5aadd302f0e9aab72032279f2b70ab8ea058cc3f32889b1dd597c6788e`.
+- Representative order-neutral item-content fingerprint:
+  `d432c21c9ce5037cb3e4f4e124d83da37faca14b8c329fcec9f84469059c3a2f`.
 
 These identities are engineering regression data only and are not benchmark evidence.
 

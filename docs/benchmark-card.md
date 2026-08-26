@@ -73,6 +73,9 @@
 - External-language overlap audit:
 - Treatment/trajectory overlap audit:
 - Selection/outcome overlap audit:
+- Mandatory quarantine-scope hash and canonical-root scan result:
+- Exact-display/order-neutral fingerprint collision audit:
+- Reverse-pair equivalence audit:
 - Public answer-leakage audit:
 - Known contamination limitations:
 
@@ -92,6 +95,8 @@
 - Private-answer bundle SHA-256:
 - Candidate bundle root SHA-256:
 - Public metadata bundle SHA-256:
+- Mandatory quarantine-scope SHA-256:
+- Reverse-pair identity domain/version:
 - Candidate manifest file SHA-256:
 - Frozen manifest logical SHA-256:
 - Ordinary artifact file hashes/manifest:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, TypeVar
 
@@ -10,9 +11,47 @@ from pydantic import BaseModel
 
 from unfrozen_schemas.config import sha256_file
 from unfrozen_schemas.evaluation.benchmark_hashing import canonical_logical_bytes
+from unfrozen_schemas.evaluation.benchmark_models import SLUG_PATTERN
 from unfrozen_schemas.provenance import ArtifactRecord
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
+def validate_benchmark_version(version: str) -> str:
+    """Validate one path-safe benchmark-version slug before any path construction."""
+
+    if not version or not re.fullmatch(SLUG_PATTERN, version):
+        raise ValueError(
+            "Benchmark version must be a non-empty lowercase slug containing only "
+            "letters, digits, dot, underscore, or hyphen"
+        )
+    posix = PurePosixPath(version)
+    windows = PureWindowsPath(version)
+    if (
+        posix.is_absolute()
+        or windows.is_absolute()
+        or windows.drive
+        or len(posix.parts) != 1
+        or len(windows.parts) != 1
+        or version in {".", ".."}
+        or "/" in version
+        or "\\" in version
+    ):
+        raise ValueError("Benchmark version must be exactly one safe path component")
+    return version
+
+
+def resolve_version_path(repository_root: Path, area: str, version: str) -> Path:
+    """Resolve a version directory below the only two lifecycle storage areas."""
+
+    if area not in {"private", "frozen"}:
+        raise ValueError(f"Unsupported benchmark version area: {area}")
+    safe_version = validate_benchmark_version(version)
+    base = (repository_root.resolve() / "benchmarks" / area).resolve()
+    resolved = (base / safe_version).resolve()
+    if resolved.parent != base:
+        raise ValueError(f"Benchmark version path escapes benchmarks/{area}: {version}")
+    return resolved
 
 
 def write_canonical_json(path: Path, value: BaseModel | dict[str, Any]) -> None:

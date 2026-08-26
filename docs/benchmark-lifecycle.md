@@ -15,11 +15,33 @@ binds one immutable purpose:
 - `retention` — a prospective separately reviewed namespace; M2.1 contains no retention items.
 
 `identity_purpose` records the purpose at creation and must equal the current purpose. Changing
-purpose requires a new authored record and new `item_id`. Validation can compare any number of
-candidate/frozen manifests with repeated `--against-manifest` options and rejects an item ID,
-purpose-bound model-input hash, or equivalent model-visible content fingerprint across purposes.
-Canonical repository use must compare all relevant existing manifests; directory names alone are
-not quarantine.
+purpose requires a new authored record and new `item_id`. Every non-engineering source must declare
+the complete canonical-root scan over `benchmarks/frozen`, `benchmarks/private`, and
+`benchmarks/selection`; omitting any root is invalid. A build stores the canonical manifest paths,
+exact manifest-file hashes, identities, item IDs, and purpose-neutral fingerprints in
+`quarantine_scope.json`. The scope has its own logical SHA-256 and is bound into the candidate root,
+candidate manifest, operation records, freeze approval, receipt, and frozen manifest.
+
+Candidate validation re-scans every declared root. Missing/unreadable roots, malformed manifests,
+added or removed external manifests, file changes, changed identities, or scope-hash mismatch fail
+closed. Freeze performs the scan both before using the approval and immediately before publication.
+The exact current candidate lineage is excluded from its own scan so publishing or copying that
+same candidate into its FROZEN directory is not self-referential; every other manifest remains in
+scope. Any external manifest added after construction makes the candidate stale and requires a new
+candidate build identity. Engineering fixtures alone use an explicit `engineering_empty` scope.
+`--against-manifest` remains a supplemental diagnostic and is never the mandatory quarantine.
+
+Two separately domain-framed, purpose-neutral fingerprints prevent identity laundering:
+
+1. `exact-displayed-input-fingerprint/v1` hashes normalised prompt, instructions, displayed
+   normalised option texts in order, and closed/open-book eligibility;
+2. `order-neutral-item-content-fingerprint/v1` hashes normalised prompt and instructions plus the
+   sorted option-text multiset, excluding every item/option/pair/variant ID, purpose, and
+   permutation field.
+
+Equivalence normalises line endings, Unicode to NFC, whitespace, and case. Cross-purpose reuse is
+therefore rejected after renamed IDs, changed pair metadata, reversed options, case-only changes, or
+Unicode/whitespace presentation changes. Directory placement alone is not quarantine.
 
 `selection_probe_v1` is reserved for M2.5 selection use. `v1_core` is reserved for the M2.6 outcome
 freeze. Neither name may identify an engineering fixture.
@@ -71,7 +93,14 @@ answer and complete-private-record hashes; metadata changes alter annotation and
 Ordered option records carry stable IDs independent of text. At least two unique IDs and unique
 normalised texts are required. `option_permutation` exactly names the displayed order. A reverse
 group has exactly two distinct items/variants with the same option-ID set and exactly reversed
-permutations.
+permutations. Its canonical `reverse-pair-identity/v1` payload requires equal purpose and benchmark
+classification, prompt/instructions, stable option-ID-to-normalised-text mapping, task/transfer/
+schema/domain/mechanism/template/partition metadata, book eligibility, scientific annotations,
+human-validation record, correct stable option ID, answer provenance, and substantive answer
+evidence. The only permitted differences are item/source-record IDs, variant ID, displayed option
+order and its exact reversed permutation, plus exactly one `reversed option presentation`
+transformation-history entry. `created_from_source_record` is the sole provenance exception; every
+other provenance field remains equal.
 
 Item and filesystem order, JSON mapping insertion order, CRLF/LF, absolute build location,
 timestamps, and machine identity do not affect logical identity. Strings are newline-normalised and
@@ -99,6 +128,7 @@ coverage_summary.json
 validation_report.json
 resource_budget.json
 operation_record.json
+quarantine_scope.json
 ```
 
 `source_snapshot.json` and `private_answers.jsonl` are answer-bearing. `items.jsonl` contains prompts,
@@ -110,8 +140,13 @@ option. All candidate descendants are private and ignored.
 Only `public_manifest.json` and `coverage_summary.json` are public views. They contain aggregate
 identity, coverage, provenance posture, and bundle roots. They contain no prompts, options, correct
 option IDs, answer indices, expected answers, gold labels, rationales, private validation notes,
-per-item private-answer hashes, or complete-private-item hashes. Validation recursively scans keys
-and values, compares them with every private answer and model-visible value, and fails closed.
+per-item private-answer hashes, or complete-private-item hashes. Validation recursively visits every
+mapping key, scalar mapping value, scalar sequence member, and arbitrarily nested mapping/sequence
+combination. It normalises Unicode, line endings, whitespace, and case before comparing exact and
+embedded values from prompts, instructions, all option IDs/texts, pair/variant/permutation IDs,
+answers/evidence/adjudication references, and per-item logical hashes. Renamed answer-equivalent
+keys also fail. The aggregate private-answer bundle root is the only permitted answer-derived public
+identity.
 
 A single private-answer bundle root may bind the complete private partition; per-item answer hashes
 are never public because small answer spaces permit brute-force recovery.
@@ -151,6 +186,10 @@ M2.1 uses standard-library SHA-256 with an explicit `domain` frame:
 | Public metadata bundle | `public-metadata-bundle/v1` |
 | Freeze approval | `freeze-approval/v1` |
 | Frozen manifest | `frozen-manifest/v1` |
+| Exact displayed input fingerprint | `exact-displayed-input-fingerprint/v1` |
+| Order-neutral item-content fingerprint | `order-neutral-item-content-fingerprint/v1` |
+| Reverse-pair identity | `reverse-pair-identity/v1` |
+| Mandatory quarantine scope | `quarantine-scope/v1` |
 
 The complete domain prefix is `unfrozen-schemas/benchmark/`. Purpose, item identity/revision, or
 benchmark version is included wherever applicable. Logical hashes never incorporate JSONL path,
@@ -164,6 +203,7 @@ hash exact retained file bytes.
 - approval schema/class, version, purpose, and engineering status;
 - exact candidate-manifest file SHA-256;
 - candidate, private-answer, and public-metadata roots;
+- exact mandatory quarantine-scope identity;
 - exact `CODEX_SPEC.md` SHA-256 and clean Git commit;
 - `PRIVATE → FROZEN` transition;
 - rights/licensing, human-validation, and ethics/governance references;
@@ -188,7 +228,16 @@ answer leakage, verifies ResourceBudget v2 and operation provenance, and checks 
 frozen-manifest chains. It never repairs an artifact or trusts stored hashes merely because they
 agree with one another.
 
-Cross-purpose comparison is explicit:
+The source-snapshot header and candidate manifest must exactly agree on version, purpose, all three
+classification flags, item count, governance references, and production prerequisites; every item
+must agree with the candidate flags. Engineering and non-engineering origin, answer-provenance, and
+governance classifications are mutually exclusive. Build operation validation requires exact Git,
+specification, resolved configuration, lifecycle, identity, flags, item count, and the exact
+`source_snapshot_sha256`/`quarantine_scope_sha256` input-key set. Freeze operation validation requires
+the analogous exact candidate/approval/scope input set. Standalone resource-budget files must be
+byte-canonical ResourceBudget JSON, not merely semantically equal JSON.
+
+Optional supplemental cross-purpose comparison remains available:
 
 ```text
 uv run unfrozen validate-benchmark --manifest <manifest> \
@@ -225,6 +274,13 @@ duplicates, leakage, corruption, unsafe paths, illegal transitions, missing/mism
 and production-readiness failure return non-zero. Non-dry-run failures attempt to preserve a strict
 sibling `BenchmarkOperationRecord` containing the original failure reason.
 
+All CLI `--version` values are validated as one lowercase slug before path construction. Version
+resolution starts at the repository root and can resolve only below `benchmarks/private/<version>`
+or `benchmarks/frozen/<version>`; traversal, slash/backslash, absolute, drive-qualified, empty, and
+dot forms fail before filesystem access. `audit-benchmark-git` uses an exact allowlist: the five
+reviewed benchmark README files are the only tracked `benchmarks/` paths in M2.1. Every other tracked
+file fails regardless of name, extension, or forced-add status.
+
 ## Operation provenance and accounting
 
 Every successful build/freeze embeds exact Git commit and dirty state, specification hash, resolved
@@ -234,6 +290,13 @@ Elapsed time uses `time.perf_counter`; peak memory means peak traced Python allo
 `tracemalloc` or is unavailable with a reason; stored artifact count/bytes are derived from retained
 hash-stable files. External language, self-generated language, sensor observations/bytes,
 environment steps, forward/backward passes, and optimisation steps are truthfully observed zero.
+
+Freeze tracks atomic publication explicitly. Any non-advisory exception after the staging directory
+is moved to the requested destination moves that directory to a sibling `invalid-frozen` name; if
+the move itself fails, generated output is removed as the final fail-closed fallback. The original
+exception remains the primary failure. Final read-back occurs after publication. Filesystem
+read-only application is advisory and its failure cannot turn an otherwise valid FROZEN publication
+into a reported failed operation.
 
 ## Engineering-fixture boundary and M2.6 prerequisites
 

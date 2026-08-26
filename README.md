@@ -79,6 +79,12 @@ The tracked fixture is non-scientific and non-promotable. M2.1 contains no outco
 item, does no scoring/model/GPU work, and cannot freeze production `v1_core`. See
 `docs/benchmark-lifecycle.md` and the unfilled `docs/benchmark-card.md` template.
 
+Non-engineering source manifests must declare the complete canonical benchmark quarantine scan;
+the resulting scope is hash-bound through candidates, approvals, operations, and frozen manifests.
+Validation also enforces purpose-neutral exact-display and order-neutral content fingerprints, the
+strict reverse-pair equivalence contract, recursive public-data isolation, exact cross-record
+provenance, repository-root version resolution, and the M2.1 tracked-README allowlist.
+
 The unreleased `schemaworld-core-v1` contract fails closed on slack or overlength active
 load-bearing tethers, diagonal movement, swept closed-boundary tunnelling, non-canonical action
 parameters, incomplete pair identities, invalid state-graph references, relation-vocabulary leakage,

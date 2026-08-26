@@ -30,6 +30,10 @@ from unfrozen_schemas.evaluation.benchmark_models import (
     BenchmarkOperationError,
     BenchmarkPurpose,
 )
+from unfrozen_schemas.evaluation.benchmark_persistence import (
+    resolve_version_path,
+    validate_benchmark_version,
+)
 from unfrozen_schemas.evaluation.benchmark_validation import (
     audit_tracked_benchmark_paths,
     validate_benchmark_manifest,
@@ -50,8 +54,10 @@ DEFAULT_CORE_CONFIG = Path("configs/experiment/milestone1_core_smoke.yaml")
 
 
 def _resolve_benchmark_manifest(version: str) -> Path:
-    private = Path("benchmarks/private") / version / "candidate_manifest.json"
-    frozen = Path("benchmarks/frozen") / version / "frozen_manifest.json"
+    repository = find_repository_root(Path.cwd())
+    safe_version = validate_benchmark_version(version)
+    private = resolve_version_path(repository, "private", safe_version) / "candidate_manifest.json"
+    frozen = resolve_version_path(repository, "frozen", safe_version) / "frozen_manifest.json"
     if frozen.is_file():
         return frozen
     if private.is_file():
@@ -356,10 +362,11 @@ def build_benchmark_command(
     """Build a deterministic answer-isolated PRIVATE benchmark candidate."""
 
     try:
+        safe_version = validate_benchmark_version(version)
         result = build_benchmark(
             source_directory=source,
             output_directory=output,
-            version=version,
+            version=safe_version,
             purpose=purpose,
             dry_run=dry_run,
         )
@@ -399,7 +406,7 @@ def validate_benchmark_command(
             file_okay=True,
             dir_okay=False,
             readable=True,
-            help="Additional manifest to enforce cross-purpose ID/content disjointness.",
+            help="Supplemental comparison in addition to the mandatory hash-bound scope.",
         ),
     ] = None,
 ) -> None:
@@ -409,8 +416,11 @@ def validate_benchmark_command(
         if (manifest is None) == (version is None):
             raise ValueError("Provide exactly one of --manifest or --version")
         selected = manifest if manifest is not None else _resolve_benchmark_manifest(str(version))
+        repository = find_repository_root(Path.cwd())
         validated = validate_benchmark_manifest(
-            selected, against_manifests=tuple(against_manifest or ())
+            selected,
+            against_manifests=tuple(against_manifest or ()),
+            repository_root=repository,
         )
     except Exception as exc:
         typer.echo(f"Benchmark validation failed: {type(exc).__name__}: {exc}", err=True)
@@ -495,16 +505,19 @@ def freeze_benchmark_command(
     try:
         if (candidate_manifest is None) == (version is None):
             raise ValueError("Provide exactly one of --candidate-manifest or --version")
+        repository = find_repository_root(Path.cwd())
+        safe_version = validate_benchmark_version(str(version)) if version is not None else None
         selected = (
             candidate_manifest
             if candidate_manifest is not None
-            else Path("benchmarks/private") / str(version) / "candidate_manifest.json"
+            else resolve_version_path(repository, "private", str(safe_version))
+            / "candidate_manifest.json"
         )
         if not selected.is_file():
             raise ValueError(f"Candidate manifest does not exist: {selected}")
         if output is None and version is None:
             raise ValueError("--output is required when --candidate-manifest is used")
-        destination = output or (Path("benchmarks/frozen") / str(version))
+        destination = output or resolve_version_path(repository, "frozen", str(safe_version))
         result = freeze_benchmark(
             candidate_manifest_path=selected,
             approval_path=approval,

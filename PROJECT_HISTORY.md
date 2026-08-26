@@ -146,6 +146,25 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Status: implementation work in progress; no merge, tag, release, benchmark freeze, or Milestone 2
   completion has occurred.
 
+## 2026-08-26
+
+### Milestone 2 M2.1 pre-merge integrity correction
+
+- Continued on `codex/milestone-2-m2-1-benchmark-lifecycle` and pull request
+  `https://github.com/yurifrusin/unfrozen-schemas/pull/5` from pre-correction head
+  `e68bd1fc91a32674008383121df5779722110522`.
+- Replaced optional operator-supplied purpose comparison with a mandatory hash-bound scan of every
+  canonical benchmark root for non-engineering candidates; engineering fixtures retain only an
+  explicit empty scope.
+- Hardened purpose-neutral fingerprints, reverse-pair equivalence, recursive public-data isolation,
+  candidate/header and operation consistency, atomic post-publication failure, benchmark-version
+  path resolution, and the tracked benchmark-path allowlist.
+- Recalculated the engineering-only regression identities because quarantine declarations and
+  identities now participate in the source, candidate, public, approval, and frozen chains. The
+  purpose-bound representative visible-item and private-answer hashes remain unchanged.
+- Status: correction remains part of the open M2.1 implementation PR. No merge, tag, release,
+  production benchmark content, M2.2 work, model access, or GPU work has occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

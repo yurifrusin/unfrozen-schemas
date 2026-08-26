@@ -22,6 +22,12 @@ def engineering_source() -> Path:
 def clean_benchmark_repository(tmp_path: Path) -> Path:
     repository = tmp_path / "provenance-repository"
     repository.mkdir()
+    for relative in (
+        "benchmarks/frozen",
+        "benchmarks/private",
+        "benchmarks/selection",
+    ):
+        repository.joinpath(relative).mkdir(parents=True)
     shutil.copyfile(Path("CODEX_SPEC.md"), repository / "CODEX_SPEC.md")
     subprocess.run(["git", "init"], cwd=repository, check=True, capture_output=True)
     subprocess.run(
