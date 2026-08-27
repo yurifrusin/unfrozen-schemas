@@ -1,9 +1,9 @@
-schema_version: "1"
+schema_version: "2"
 candidate_version: engineering-literal-fixture-v1
 purpose: engineering
 environment_version: schemaworld-core-v1
-generator_version: literal-generator-v2
-partition_plan_version: literal-partition-plan-v2
+generator_version: literal-generator-v3
+partition_plan_version: literal-partition-plan-v3
 authoring_manifest: tests/fixtures/literal_benchmark/authoring.json
 source_root: tests/fixtures/literal_benchmark/generated-source
 candidate_root: tests/fixtures/literal_benchmark/generated-candidate

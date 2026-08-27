@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
+from pydantic import ValidationError
 
 from unfrozen_schemas.envs.schema_world.renderer import BACKGROUND
 from unfrozen_schemas.evaluation.benchmark_lifecycle import build_benchmark
@@ -26,8 +27,10 @@ from unfrozen_schemas.evaluation.literal_hashing import (
     review_manifest_hash,
 )
 from unfrozen_schemas.evaluation.literal_models import (
+    LiteralAuditStatus,
     LiteralCandidateManifest,
     LiteralCueDispositionRecord,
+    LiteralLexicalCategory,
     LiteralOperationError,
     LiteralOperationRecord,
     LiteralReviewItem,
@@ -125,29 +128,29 @@ def test_complete_pipeline_and_regression_hashes(literal_pipeline: Pipeline) -> 
     assert composite.semantic_group_count == 8
     assert composite.source_item_count == 16
     assert composite.authoring_snapshot_sha256 == (
-        "71fad8211ae65f71548a85af713f9314ca56033e3eb00da320db43855dc9e2ca"
+        "a85ded9dfa0c06da369699bb0d6bef5ff84221d477dc4af43034acb4821bef6d"
     )
     assert composite.m2_1_candidate_bundle_root_sha256 == (
-        "b2db23f28ad841c83900be5c488b0e65368beb67be17d69663b3e9034764518b"
+        "dfd0594922338cd9ec86a9ef33f223f5da46867df658cb9c8e1d94ccd147e487"
     )
     assert composite.partition_plan_sha256 == (
-        "8d5978ae90ada2c725db19d029c6a789495f56a48a01755f061f278673bbdda1"
+        "5a2dc4f21978825fc744132f72d155b86ca7fe84395da95553ec77319f8cf9a1"
     )
     assert composite.template_registry_sha256 == (
-        "7ec1508923f21a779fa4f038fbc72a48b6b9808df967f128050be607b8d4fc0b"
+        "d320923aaa794cc901d3f60215726ed157d7b3830d787a4aff545f78ce09a346"
     )
     assert composite.witness_bundle_sha256 == (
-        "afc6b013c42de6152243b18aebb621ea7ed0b9152490b22cfbfeb34be17da8df"
+        "da7484f22355d3ebe380e2fea2493e67383338478e215c75944f5f14f6889092"
     )
     assert composite.literal_validation_report_sha256 == (
-        "32be1e8af71d11b6b69dfa76e41bc84a81cd46d75f7be09381a196ba17d72d11"
+        "b60a2ec455ab39f773f7dc645e7a9321d75a98e1e7943680e4552ccff12b0a2c"
     )
     assert composite.literal_candidate_root_sha256 == (
-        "23a3e1a75adf70fecacf1f7fab4fdc350a2bd68cbf60b0a23c3840a341a235d7"
+        "69a92b6122679dd580cfcd93fc522f85b21f6ed2af34d1107ccceb78cffcb32a"
     )
     assert review_manifest.review_operation_sha256
     assert review_manifest.review_manifest_sha256 == (
-        "21a7466cefb2acbe13a462c6ff7bb81740a93a7d8c739c6271e2790bc5851102"
+        "c753f953cabd0919241564a90b3d97026b2c48127e76b3b8be9dac6d170abdef"
     )
     assert len(review_manifest.render_records) == 8 * composite.semantic_group_count
     assert len({record.path for record in review_manifest.render_records}) == 64
@@ -344,7 +347,7 @@ def test_review_artifact_and_decoded_png_mutations_are_rejected(
 def test_review_zoom_is_bound_to_full_frame_and_magnifies_support_geometry(
     literal_pipeline: Pipeline,
 ) -> None:
-    _source, _candidate, _manifest, review, _composite, review_manifest = literal_pipeline
+    source, _candidate, _manifest, review, _composite, review_manifest = literal_pipeline
     review_items = read_jsonl_models(
         review / "item_review.jsonl", LiteralReviewItem, require_canonical=True
     )
@@ -371,7 +374,31 @@ def test_review_zoom_is_bound_to_full_frame_and_magnifies_support_geometry(
     assert zoom_record.source_full_frame_raw_pixel_sha256 == full_record.raw_pixel_sha256
 
     cue = read_canonical_model(review / "cue_disposition_pending.json", LiteralCueDispositionRecord)
-    assert cue.required_category_membership_hashes
+    loaded = load_literal_source(source)
+    expected_categories = {
+        summary.category: summary.category_membership_sha256
+        for summary in loaded.lexical_audit.category_summaries
+        if summary.owner_disposition_required
+    }
+    assert cue.required_category_membership_hashes == expected_categories
+    assert set(cue.required_category_membership_hashes) <= {
+        LiteralLexicalCategory.NECESSARY_CAUSAL_CONDITION_VOCABULARY,
+        LiteralLexicalCategory.PHYSICAL_MECHANISM_CORRELATION,
+        LiteralLexicalCategory.DUPLICATE_MATCHED_WORDING,
+    }
+    assert cue.consequential_finding_ids == tuple(
+        finding.finding_id
+        for finding in loaded.lexical_audit.findings
+        if finding.disposition is not LiteralAuditStatus.PASS
+    )
+    assert cue.accepted_category_membership_hashes == ()
+    assert cue.rejected_category_membership_hashes == ()
+    assert cue.accepted_finding_ids == ()
+    assert cue.rejected_finding_ids == ()
+    invalid = cue.model_dump(mode="json")
+    invalid["accepted_finding_ids"] = ["0" * 64]
+    with pytest.raises(ValidationError, match="unbound finding ID"):
+        LiteralCueDispositionRecord.model_validate(invalid)
     assert not hasattr(cue, "required_finding_indexes")
 
 

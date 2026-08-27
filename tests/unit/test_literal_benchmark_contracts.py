@@ -9,9 +9,11 @@ import pytest
 from pydantic import ValidationError
 
 from unfrozen_schemas.envs.schema_world.serialization import canonical_hash, primary_observation
+from unfrozen_schemas.envs.schema_world.state import BoundarySide
 from unfrozen_schemas.evaluation.benchmark_hashing import normalise_source_item
 from unfrozen_schemas.evaluation.literal_contracts import (
     intervention_contract,
+    mechanism_kind_signature,
     render_literal_prompt,
 )
 from unfrozen_schemas.evaluation.literal_generation import _source_items
@@ -25,7 +27,11 @@ from unfrozen_schemas.evaluation.literal_models import (
     ContainmentScenarioCase,
     LiteralAuditStatus,
     LiteralAuthoringManifest,
+    LiteralDirection,
+    LiteralLexicalAudit,
     LiteralLexicalCategory,
+    LiteralMechanismKind,
+    LiteralNarrativeFacts,
     LiteralOutcomeCode,
     LiteralPartition,
     LiteralPartitionPlan,
@@ -44,6 +50,9 @@ from unfrozen_schemas.evaluation.literal_scenarios import (
 )
 from unfrozen_schemas.evaluation.literal_validation import (
     LoadedLiteralSource,
+    _association_disposition,
+    _lexical_category,
+    _sentence_ngrams,
     build_lexical_audit,
     build_split_audit,
     validate_loaded_literal_source,
@@ -236,16 +245,15 @@ def test_all_six_task_family_renderers_have_exact_natural_wording(
     assert observed == {
         LiteralTaskFamily.DIRECT_OUTCOME: (
             "Consider the following physical setup. The object begins inside the container and "
-            "the perimeter has an enabled opening aligned with and wide enough for the object on "
-            "its right side. Then the object moves outward through the right side. Which direct "
-            "outcome follows?"
+            "the perimeter has a closed boundary with an enabled opening aligned with and wide "
+            "enough for the object on its right side. Then the object moves outward through the "
+            "right side. Which direct outcome follows?"
         ),
         LiteralTaskFamily.INTERVENTION_CONSEQUENCE: (
             "Consider the following physical setup. The object begins inside the container and "
-            "the perimeter has an enabled opening aligned with and wide enough for the object on "
-            "its right side. Now the object moves outward through the right side. Which "
-            "consequence "
-            "is caused by the intervention?"
+            "the perimeter has a closed boundary with an enabled opening aligned with and wide "
+            "enough for the object on its right side. Now the object moves outward through the "
+            "right side. Which consequence is caused by the intervention?"
         ),
         LiteralTaskFamily.MATCHED_COUNTERFACTUAL: (
             "Consider two otherwise matched physical setups. In the actual setup, a platform is "
@@ -256,12 +264,12 @@ def test_all_six_task_family_renderers_have_exact_natural_wording(
         ),
         LiteralTaskFamily.NOVEL_TEMPLATE: (
             "A physical setup is described as follows: the object begins outside the container and "
-            "the relevant perimeter is fully open on its left side. Next, the object moves inward "
+            "the perimeter has no closed boundary on its left side. Next, the object moves inward "
             "through the left side. What is the object's outcome?"
         ),
         LiteralTaskFamily.NOVEL_CONFIGURATION: (
             "Consider the following physical setup. The object begins outside the container and "
-            "the relevant perimeter is fully open on its left side. After the object moves inward "
+            "the perimeter has no closed boundary on its left side. After the object moves inward "
             "through the left side, what happens to the object?"
         ),
         LiteralTaskFamily.PHYSICAL_ANALOGY: (
@@ -272,6 +280,41 @@ def test_all_six_task_family_renderers_have_exact_natural_wording(
             "the tether is cut. What happens to the object?"
         ),
     }
+
+
+def test_no_change_intervention_uses_control_aware_question(
+    literal_authoring: LiteralAuthoringManifest,
+) -> None:
+    base = next(
+        scenario
+        for scenario in literal_authoring.scenarios
+        if scenario.scenario_case is SupportScenarioCase.LOWER_SUPPORT_NOOP
+    )
+    scenario = base.model_copy(
+        update={
+            "semantic_group_id": "renderer-no-change-control",
+            "task_family": LiteralTaskFamily.INTERVENTION_CONSEQUENCE,
+            "prompt_template_id": "renderer-no-change-control",
+        }
+    )
+    template = LiteralTemplate(
+        template_id=scenario.prompt_template_id,
+        task_family=scenario.task_family,
+        transfer_level=scenario.transfer_level,
+        vocabulary_mode="literal_physics",
+    )
+    witness = build_witness(scenario, template)
+    prompt = render_literal_prompt(template, witness.narrative_facts)
+    assert prompt == (
+        "Consider the following physical setup. A platform is in lower contact with the object "
+        "and there is no tether. Now the setup is observed without removing or changing anything. "
+        "Which outcome is observed under this unchanged control?"
+    )
+    assert "intervention" not in prompt.casefold()
+    payload = witness.narrative_facts.model_dump(mode="json")
+    payload["task_family_question"] = "Which consequence is caused by the intervention?"
+    with pytest.raises(ValidationError, match="unchanged-control question"):
+        LiteralNarrativeFacts.model_validate(payload)
 
 
 def test_partition_plan_disjointness_and_hashing(
@@ -424,6 +467,47 @@ def test_seed_scene_and_option_nouns_do_not_create_a_new_causal_scenario(
     } == {binding.structural_signatures.causal_scenario_sha256 for binding in changed_bindings}
 
 
+def test_orientation_and_action_changes_cannot_manufacture_a_mechanism_kind(
+    literal_authoring: LiteralAuthoringManifest,
+) -> None:
+    scenario = next(
+        item
+        for item in literal_authoring.scenarios
+        if item.scenario_case is ContainmentScenarioCase.FITTING_OPENING
+    )
+    template = _template(literal_authoring, scenario)
+    original = build_witness(scenario, template)
+    side_changed = build_witness(
+        scenario.model_copy(update={"side": BoundarySide.LEFT, "scene_name": "Side Changed Scene"}),
+        template,
+    )
+    action_changed = build_witness(
+        scenario.model_copy(
+            update={
+                "direction": LiteralDirection.ENTRY,
+                "scene_name": "Action Changed Scene",
+            }
+        ),
+        template,
+    )
+    expected_kind = mechanism_kind_signature(LiteralMechanismKind.FITTING_APERTURE)
+    assert {
+        original.structural_signatures.target_mechanism_kind_sha256,
+        side_changed.structural_signatures.target_mechanism_kind_sha256,
+        action_changed.structural_signatures.target_mechanism_kind_sha256,
+    } == {expected_kind}
+    assert (
+        len(
+            {
+                original.structural_signatures.target_mechanism_sha256,
+                side_changed.structural_signatures.target_mechanism_sha256,
+                action_changed.structural_signatures.target_mechanism_sha256,
+            }
+        )
+        > 1
+    )
+
+
 def test_option_semantics_drift_is_rejected_after_refreshing_snapshot_root(
     literal_pipeline_source: LoadedLiteralSource,
 ) -> None:
@@ -496,6 +580,16 @@ def test_mechanism_transfer_compares_every_l1_and_prospective_source(
         if binding.transfer_level is LiteralTransferLevel.L1
     }
     assert l1_signatures == set(loaded.partition_plan.prohibited_l1_source_mechanism_signatures)
+    l1_kind_signatures = {
+        binding.structural_signatures.target_mechanism_kind_sha256
+        for binding in bindings
+        if binding.transfer_level is LiteralTransferLevel.L1
+    }
+    assert l1_kind_signatures == set(
+        loaded.partition_plan.prohibited_l1_source_mechanism_kind_signatures
+    )
+    assert mechanism_kind_signature(LiteralMechanismKind.FITTING_APERTURE) in l1_kind_signatures
+    assert mechanism_kind_signature(LiteralMechanismKind.UNDERSIZED_APERTURE) in l1_kind_signatures
     incomplete = loaded.partition_plan.model_copy(
         update={
             "prohibited_l1_source_mechanism_signatures": tuple(sorted(l1_signatures))[1:],
@@ -542,6 +636,83 @@ def test_mechanism_transfer_compares_every_l1_and_prospective_source(
             bindings=bindings,
             witnesses=loaded.witness_bundle.witnesses,
             partition_plan=coordinated,
+        )
+
+    target_kind = transfer.structural_signatures.target_mechanism_kind_sha256
+    prospective_kinds = tuple(
+        sorted(
+            {
+                *loaded.partition_plan.prospective_adaptation_source_mechanism_kind_signatures,
+                target_kind,
+            }
+        )
+    )
+    coordinated_kinds = loaded.partition_plan.model_copy(
+        update={
+            "prospective_adaptation_source_mechanism_kind_signatures": prospective_kinds,
+            "prohibited_mechanism_transfer_target_kind_signatures": tuple(
+                sorted(l1_kind_signatures | set(prospective_kinds))
+            ),
+        }
+    )
+    with pytest.raises(ValueError, match="prohibited mechanism-kind source material"):
+        build_split_audit(
+            candidate_version=loaded.source_manifest.benchmark_version,
+            items=loaded.items,
+            bindings=bindings,
+            witnesses=loaded.witness_bundle.witnesses,
+            partition_plan=coordinated_kinds,
+        )
+
+
+@pytest.mark.parametrize(
+    ("target_kind", "target_case"),
+    (
+        (LiteralMechanismKind.FITTING_APERTURE, ContainmentScenarioCase.FITTING_OPENING),
+        (
+            LiteralMechanismKind.UNDERSIZED_APERTURE,
+            ContainmentScenarioCase.UNDERSIZED_OPENING,
+        ),
+    ),
+)
+def test_l1_aperture_kind_cannot_pass_as_transfer_through_a_new_configuration_hash(
+    literal_pipeline_source: LoadedLiteralSource,
+    target_kind: LiteralMechanismKind,
+    target_case: ContainmentScenarioCase,
+) -> None:
+    loaded = literal_pipeline_source
+    transfer = next(
+        binding
+        for binding in loaded.item_bindings.bindings
+        if binding.task_family is LiteralTaskFamily.PHYSICAL_ANALOGY
+    )
+    original_configuration = transfer.structural_signatures.target_mechanism_sha256
+    mutated = transfer.model_copy(
+        update={
+            "target_mechanism": target_kind,
+            "scenario_case": target_case,
+            "structural_signatures": transfer.structural_signatures.model_copy(
+                update={
+                    "target_mechanism_kind_sha256": mechanism_kind_signature(target_kind),
+                }
+            ),
+        }
+    )
+    assert mutated.structural_signatures.target_mechanism_sha256 == original_configuration
+    assert original_configuration not in set(
+        loaded.partition_plan.prohibited_mechanism_transfer_target_signatures
+    )
+    bindings = tuple(
+        mutated if binding.semantic_group_id == transfer.semantic_group_id else binding
+        for binding in loaded.item_bindings.bindings
+    )
+    with pytest.raises(ValueError, match="prohibited mechanism-kind source material"):
+        build_split_audit(
+            candidate_version=loaded.source_manifest.benchmark_version,
+            items=loaded.items,
+            bindings=bindings,
+            witnesses=loaded.witness_bundle.witnesses,
+            partition_plan=loaded.partition_plan,
         )
 
 
@@ -687,6 +858,115 @@ def test_lexical_findings_remain_owner_review_required(
             items=corrupted_items,
             bindings=loaded.item_bindings.bindings,
         )
+
+
+def test_lexical_bigrams_never_cross_sentence_or_line_boundaries() -> None:
+    ngrams = _sentence_ngrams("The platform is removed. Which outcome follows?\nChoose one.")
+    assert "platform is" in ngrams
+    assert "which outcome" in ngrams
+    assert "removed which" not in ngrams
+    assert "follows choose" not in ngrams
+
+
+@pytest.mark.parametrize(
+    ("marker", "token", "category"),
+    (
+        (
+            "The marker is left.",
+            "left",
+            LiteralLexicalCategory.NUISANCE_DIRECTION_ORIENTATION_VOCABULARY,
+        ),
+        (
+            "The zonule persists.",
+            "zonule",
+            LiteralLexicalCategory.RENDERER_GRAMMATICAL_CONSTRUCTION_CUE,
+        ),
+    ),
+)
+def test_nuisance_and_renderer_correlations_are_rejected_not_escalated(
+    literal_pipeline_source: LoadedLiteralSource,
+    marker: str,
+    token: str,
+    category: LiteralLexicalCategory,
+) -> None:
+    loaded = literal_pipeline_source
+    left = loaded.item_bindings.bindings[0]
+    right = next(
+        binding
+        for binding in loaded.item_bindings.bindings[1:]
+        if binding.task_family is left.task_family
+    )
+    bindings = tuple(
+        binding.model_copy(update={"stable_correct_option_id": left.stable_correct_option_id})
+        if binding.semantic_group_id == right.semantic_group_id
+        else binding
+        for binding in loaded.item_bindings.bindings
+    )
+    selected = {*left.item_ids, *right.item_ids}
+    items = tuple(
+        item.model_copy(
+            update={
+                "model_visible": item.model_visible.model_copy(
+                    update={
+                        "prompt": (
+                            f"Consider a physical setup. {marker} Which outcome?"
+                            if item.item_id in left.item_ids
+                            else f"Consider another physical setup. {marker} Which outcome?"
+                        )
+                    }
+                )
+            }
+        )
+        if item.item_id in selected
+        else item
+        for item in loaded.items
+    )
+    assert _lexical_category(token) is category
+    assert _association_disposition(category, 2) is LiteralAuditStatus.FAIL
+    with pytest.raises(ValueError, match="Literal lexical audit failed"):
+        build_lexical_audit(
+            candidate_version=loaded.source_manifest.benchmark_version,
+            items=items,
+            bindings=bindings,
+        )
+
+
+def test_lexical_subcategory_membership_hash_changes_with_exact_membership(
+    literal_pipeline_source: LoadedLiteralSource,
+) -> None:
+    loaded = literal_pipeline_source
+    original = build_lexical_audit(
+        candidate_version=loaded.source_manifest.benchmark_version,
+        items=loaded.items,
+        bindings=loaded.item_bindings.bindings,
+    )
+    selected = set(loaded.item_bindings.bindings[0].item_ids)
+    items = tuple(
+        item.model_copy(
+            update={
+                "model_visible": item.model_visible.model_copy(
+                    update={"prompt": f"{item.model_visible.prompt} Zonule."}
+                )
+            }
+        )
+        if item.item_id in selected
+        else item
+        for item in loaded.items
+    )
+    changed = build_lexical_audit(
+        candidate_version=loaded.source_manifest.benchmark_version,
+        items=items,
+        bindings=loaded.item_bindings.bindings,
+    )
+
+    def category_hash(audit: LiteralLexicalAudit) -> str:
+        return next(
+            summary.category_membership_sha256
+            for summary in audit.category_summaries
+            if summary.category is LiteralLexicalCategory.RENDERER_GRAMMATICAL_CONSTRUCTION_CUE
+        )
+
+    assert category_hash(original) != category_hash(changed)
 
 
 def test_option_forms_are_parallel_and_length_is_not_answer_deterministic(

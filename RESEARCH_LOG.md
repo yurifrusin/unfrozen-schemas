@@ -254,6 +254,35 @@ adds visible connection geometry. Neither view promotes PNG container bytes into
 identity. These changes remain candidate-engineering evidence pending independent rereview; they do
 not establish human validity, rights, ethics, model transfer, or a Phase I result.
 
+### 2026-08-27 — Mechanism transfer requires kind novelty, and cue review requires causal taxonomy
+
+A configuration hash cannot by itself establish mechanism transfer: changing an aperture side,
+movement direction, or action instance can change a configuration while leaving the physical
+mechanism unchanged. M2.2 therefore retains configuration-specific signatures for provenance but
+adds a separate versioned mechanism-kind identity derived only from the typed physical mechanism.
+The complete L1 and prospective adaptation-source sets prohibit reuse at both levels, and the L1
+source witness must instantiate a kind distinct from the L2 target kind.
+
+The released Core already supports an honest balanced design. The two containment cases previously
+called physical analogies are reclassified as novel-template measurements, while four existing
+support cases with load-bearing or nonbearing tether targets become genuine lower-contact-to-tether
+mechanism analogies. This restores the prospective eight-by-six family balance without new dynamics
+or an owner design decision.
+
+Question semantics are also part of the causal contract. A no-change action is a control
+observation, not an intervention-caused consequence, so its question is reconstructed from typed
+`NOOP`/`WAIT` status and incompatible causal wording is rejected. Lexical evidence is now tokenised
+within sentences and separated into necessary causal conditions, physical mechanisms, nuisance
+orientation, renderer form, boundary artifacts, task/meta vocabulary, nuisance identifiers, and
+duplicate/matched wording. Intrinsic construct associations remain visible for owner review;
+repeated nuisance or renderer correlations are design failures to rewrite or rebalance, not cues for
+the owner to accept. Exact duplicates remain non-independent measurements and still require M2.4
+clustering or weighting.
+
+These decisions correct candidate construct validity but do not verify the three review findings,
+approve private content, or establish human validity, rights, ethics, model transfer, or any Phase I
+result. Independent rereview remains required.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>

@@ -44,7 +44,6 @@ from unfrozen_schemas.evaluation.literal_models import (
     LiteralAuditStatus,
     LiteralCandidateManifest,
     LiteralCueDispositionRecord,
-    LiteralLexicalCategory,
     LiteralOperationError,
     LiteralOperationRecord,
     LiteralOperationResult,
@@ -817,11 +816,6 @@ def _cue_disposition(
         finding.finding_id
         for finding in loaded.lexical_audit.findings
         if finding.disposition is not LiteralAuditStatus.PASS
-        and finding.category
-        in {
-            LiteralLexicalCategory.NUISANCE_IDENTIFIER_VOCABULARY,
-            LiteralLexicalCategory.DUPLICATE_WORDING,
-        }
     )
     return LiteralCueDispositionRecord(
         candidate_version=composite.candidate_version,
@@ -898,7 +892,8 @@ def build_literal_review(*, source_root: Path, output_root: Path) -> LiteralOper
                 "- [ ] Reverse variants preserve semantics and the stable answer.",
                 "- [ ] Structural novelty evidence supports every declared L2 classification.",
                 "- [ ] Actual/counterfactual pairs obey prospective intervention contracts.",
-                "- [ ] All lexical findings have an explicit owner disposition.",
+                "- [ ] Every owner-review-required lexical finding is dispositioned by its exact "
+                "subcategory membership hash or exact finding ID.",
                 "- [ ] The decision binds the exact PR, head, operations, and manifests.",
                 "",
                 "Decision: PENDING",

@@ -1,11 +1,11 @@
 {
-  "schema_version": "3",
+  "schema_version": "4",
   "authoring_kind": "private_literal_authoring",
   "candidate_version": "engineering-literal-fixture-v1",
   "purpose": "engineering",
   "environment_version": "schemaworld-core-v1",
-  "generator_version": "literal-generator-v2",
-  "partition_plan_version": "literal-partition-plan-v2",
+  "generator_version": "literal-generator-v3",
+  "partition_plan_version": "literal-partition-plan-v3",
   "outcome_text_registry_version": "literal-outcome-text-registry-v2",
   "engineering_only": true,
   "scientific_eligible": false,
@@ -279,5 +279,10 @@
   "prospective_adaptation_source_mechanism_signatures": [
     "1111111111111111111111111111111111111111111111111111111111111111",
     "2222222222222222222222222222222222222222222222222222222222222222"
+  ],
+  "prospective_adaptation_source_mechanism_kind_signatures": [
+    "75e74b937863837551badd8b617c90460c876b085edf8ed986560e07fdd56779",
+    "a938ddec2aa56063a2da9a5def04a0b8dd1d5d2839590ef26bf99f23b9d39ca5",
+    "af7d0def89f67d1f8ab6b150678aa6d7be5cc2616d95e24b37f1098a051727d9"
   ]
 }

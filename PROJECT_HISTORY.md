@@ -276,6 +276,25 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
   private artifact regeneration remain pending in this correction task. No merge, tag, release,
   production freeze, M2.3, model/GPU, treatment, or EPS work occurred.
 
+### 2026-08-27 — M2.2 scientific-convergence correction
+
+- Continued pull request `#7` from exact reviewed head
+  `4532e39f9afb75865ee4183c5ceef71770192c5c` after branch, upstream, pull-request, canonical-base,
+  clean-tree, private-identity, and protected CPU-check preflight.
+- Implemented `US-PR0007-SR-0001`, `US-PR0007-SR-0003`, and `US-PR0007-SR-0005` as
+  `IMPLEMENTED_PENDING_VERIFICATION`. Configuration-specific mechanism signatures are retained,
+  while a new coarse typed mechanism-kind identity binds the complete L1/prospective prohibited
+  sets and the genuine L1-source-to-L2-target mapping.
+- Made no-change questions reconstruct from `NOOP`/`WAIT` action status, split lexical findings into
+  selective hash-bound scientific subcategories with sentence-local n-grams, and configured an
+  exact eight groups per authorised task family.
+- Added coordinated mechanism-kind, fitting/undersized prohibited-kind, unchanged-control,
+  nuisance/renderer, sentence-boundary, subcategory-membership, and selective-disposition
+  regressions. The corrected private authoring migration was first validated entirely in memory.
+- Status: local verification, the bounded correction commit, exact-head protected CI, and private
+  regeneration remain part of this correction task. No merge, tag, release, freeze, M2.3,
+  model/GPU, treatment, scientific result, or EPS work occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

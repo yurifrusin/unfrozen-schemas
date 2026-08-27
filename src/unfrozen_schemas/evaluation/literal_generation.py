@@ -310,8 +310,23 @@ def _partition_plan(
         )
     )
     prospective_source_signatures = authoring.prospective_adaptation_source_mechanism_signatures
+    l1_source_kind_signatures = tuple(
+        sorted(
+            {
+                item.structural_signatures.target_mechanism_kind_sha256
+                for item in witnesses
+                if item.transfer_level is LiteralTransferLevel.L1
+            }
+        )
+    )
+    prospective_source_kind_signatures = (
+        authoring.prospective_adaptation_source_mechanism_kind_signatures
+    )
     prohibited_target_signatures = tuple(
         sorted(set(l1_source_signatures) | set(prospective_source_signatures))
+    )
+    prohibited_target_kind_signatures = tuple(
+        sorted(set(l1_source_kind_signatures) | set(prospective_source_kind_signatures))
     )
     provisional = LiteralPartitionPlan(
         candidate_version=authoring.candidate_version,
@@ -349,9 +364,20 @@ def _partition_plan(
         reserved_target_mechanism_signatures=tuple(
             sorted({item.structural_signatures.target_mechanism_sha256 for item in witnesses})
         ),
+        reserved_source_mechanism_kind_signatures=tuple(
+            sorted({item.structural_signatures.source_mechanism_kind_sha256 for item in witnesses})
+        ),
+        reserved_target_mechanism_kind_signatures=tuple(
+            sorted({item.structural_signatures.target_mechanism_kind_sha256 for item in witnesses})
+        ),
         prohibited_l1_source_mechanism_signatures=l1_source_signatures,
         prospective_adaptation_source_mechanism_signatures=prospective_source_signatures,
         prohibited_mechanism_transfer_target_signatures=prohibited_target_signatures,
+        prohibited_l1_source_mechanism_kind_signatures=l1_source_kind_signatures,
+        prospective_adaptation_source_mechanism_kind_signatures=(
+            prospective_source_kind_signatures
+        ),
+        prohibited_mechanism_transfer_target_kind_signatures=(prohibited_target_kind_signatures),
         reserved_observation_structure_signatures=tuple(
             sorted({item.structural_signatures.observation_structure_sha256 for item in witnesses})
         ),
@@ -414,13 +440,25 @@ def _coverage(config: LoadedLiteralConfig, bindings: Sequence[LiteralItemBinding
         raise ValueError("Literal cross-family matched-variant floor is not met")
     schemas = Counter(binding.schema_identity for binding in bindings)
     levels = Counter(binding.transfer_level for binding in bindings)
-    families = {binding.task_family for binding in bindings}
+    family_counts = Counter(binding.task_family for binding in bindings)
+    families = set(family_counts)
     if not set(coverage.required_schemas) <= set(schemas):
         raise ValueError("Literal source is missing a required schema")
     if not set(coverage.required_levels) <= set(levels):
         raise ValueError("Literal source is missing a required transfer level")
     if not set(coverage.required_task_families) <= families:
         raise ValueError("Literal source is missing a required task family")
+    if coverage.required_groups_per_task_family is not None:
+        mismatched = {
+            family.value: family_counts[family]
+            for family in coverage.required_task_families
+            if family_counts[family] != coverage.required_groups_per_task_family
+        }
+        if mismatched:
+            raise ValueError(
+                "Literal task-family balance does not match the configured exact count: "
+                f"{dict(sorted(mismatched.items()))}"
+            )
     for schema in coverage.required_schemas:
         if schemas[schema] < coverage.minimum_groups_per_schema:
             raise ValueError(f"Literal source has too few {schema.value} groups")

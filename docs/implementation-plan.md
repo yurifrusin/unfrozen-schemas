@@ -331,13 +331,17 @@ immutable; corrections receive a new correction tag and release.
 - **Dependencies:** M2.1 and SchemaWorld interfaces.
 - **Files:** benchmark source templates/items, literal evaluator, regression fixtures, tests.
 - **Implementation steps:** Author clean splits; vary identities, positions, mechanisms, and
-  counterfactuals; bind separate source/target mechanism identities; reserve complete L1 and
-  prospective adaptation-source signature sets; distinguish question forms from causal scenarios
-  and independent strata; annotate causal factors and source families; audit training overlap.
+  counterfactuals; bind separate source/target configuration signatures and coarse typed
+  mechanism-kind identities; reserve complete L1 and prospective adaptation-source sets for both;
+  derive intervention questions from typed action/control status; distinguish question forms from
+  causal scenarios and independent strata; annotate causal factors and source families; audit
+  training overlap; require exactly eight groups in each of the six authorised task families.
 - **Acceptance tests:** Split disjointness, all-source mechanism-transfer rejection, answer
   correctness against simulator, natural six-family prompt reconstruction, parallel option forms,
-  support-aware category-bound lexical-cue checks, review-render visibility, causal-scenario
-  invariance to seed/scene/noun changes, and reverse-option equivalence.
+  exact no-change-control wording and semantic-mutation rejection, sentence-local n-grams,
+  selective hash-bound causal/mechanism/nuisance/renderer/boundary/duplicate cue categories,
+  review-render visibility, causal-scenario invariance to seed/scene/noun changes, and reverse-option
+  equivalence.
 - **Scientific invariants:** L0 fit cannot substitute for L1/L2; hidden test content stays isolated.
 - **Artifacts:** Reviewed private literal benchmark candidates.
 - **Failure modes and risks:** Template memorisation, source/test overlap, or single-cue answers.

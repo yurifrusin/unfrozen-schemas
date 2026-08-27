@@ -26,6 +26,7 @@ class LiteralCoverageConfig(FrozenModel):
     required_schemas: tuple[LiteralSchema, ...]
     required_levels: tuple[LiteralTransferLevel, ...]
     required_task_families: tuple[LiteralTaskFamily, ...]
+    required_groups_per_task_family: int | None = Field(default=None, ge=1)
     minimum_groups_per_schema: int = Field(ge=1)
     minimum_groups_per_schema_level: int = Field(ge=1)
 
@@ -48,12 +49,12 @@ class LiteralExecutionConfig(FrozenModel):
 
 
 class LiteralConfig(FrozenModel):
-    schema_version: Literal["1"]
+    schema_version: Literal["2"]
     candidate_version: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
     purpose: Literal["outcome", "engineering"]
     environment_version: Literal["schemaworld-core-v1"] = "schemaworld-core-v1"
-    generator_version: Literal["literal-generator-v2"] = "literal-generator-v2"
-    partition_plan_version: Literal["literal-partition-plan-v2"] = "literal-partition-plan-v2"
+    generator_version: Literal["literal-generator-v3"] = "literal-generator-v3"
+    partition_plan_version: Literal["literal-partition-plan-v3"] = "literal-partition-plan-v3"
     authoring_manifest: str = Field(min_length=1)
     source_root: str = Field(min_length=1)
     candidate_root: str = Field(min_length=1)

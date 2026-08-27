@@ -11,6 +11,7 @@ from unfrozen_schemas.envs.schema_world.serialization import primary_observation
 from unfrozen_schemas.envs.schema_world.state import BoundarySide, EntityRole, WorldState
 from unfrozen_schemas.evaluation.literal_hashing import structural_signature_hash, template_hash
 from unfrozen_schemas.evaluation.literal_models import (
+    LITERAL_MECHANISM_KIND_VERSION,
     ContainmentScenarioCase,
     LiteralCausalFactor,
     LiteralDirection,
@@ -200,6 +201,18 @@ def target_mechanism(
     return _MECHANISMS[case]
 
 
+def mechanism_kind_signature(value: LiteralMechanismKind) -> str:
+    """Hash only the typed physical mechanism kind, never its configuration."""
+
+    return structural_signature_hash(
+        "mechanism-kind",
+        {
+            "mechanism_kind_version": LITERAL_MECHANISM_KIND_VERSION,
+            "mechanism_kind": value.value,
+        },
+    )
+
+
 def _opening_quality(state: WorldState, side: BoundarySide) -> str:
     boundary = state.boundaries[0]
     if not boundary.closed:
@@ -241,17 +254,20 @@ def _scene_clause(
         location = "inside" if direction is LiteralDirection.EXIT else "outside"
         quality = _opening_quality(state, side)
         descriptions = {
-            "fully-open-perimeter": "the relevant perimeter is fully open",
-            "closed-perimeter": "the relevant perimeter is closed and has no opening",
-            "disabled-opening": "the perimeter is closed and its opening is disabled",
+            "fully-open-perimeter": "the perimeter has no closed boundary",
+            "closed-perimeter": "the perimeter has a closed boundary without an opening",
+            "disabled-opening": "the perimeter has a closed boundary with a disabled opening",
             "fitting-opening": (
-                "the perimeter has an enabled opening aligned with and wide enough for the object"
+                "the perimeter has a closed boundary with an enabled opening aligned with and "
+                "wide enough for the object"
             ),
             "undersized-opening": (
-                "the perimeter has an enabled opening that is too small for the object"
+                "the perimeter has a closed boundary with an enabled opening aligned with but "
+                "too small for the object"
             ),
             "misaligned-opening": (
-                "the perimeter has an enabled opening that is not aligned with the object"
+                "the perimeter has a closed boundary with an enabled opening wide enough but "
+                "not aligned with the object"
             ),
         }
         return (
@@ -265,7 +281,7 @@ def _scene_clause(
     elif tether.load_bearing:
         extra = "a taut load-bearing tether connects the object to an upper anchor"
     else:
-        extra = "a visible tether is present but is not load-bearing"
+        extra = "a non-load-bearing tether connects the object to an upper anchor"
     contact = (
         "a platform is in lower contact with the object"
         if geometry == "lower-contact"
@@ -342,7 +358,12 @@ def _mechanism_summary(value: LiteralMechanismKind) -> str:
     }[value]
 
 
-def _task_question(family: LiteralTaskFamily) -> str:
+def _task_question(family: LiteralTaskFamily, action_kind: ActionKind) -> str:
+    if family is LiteralTaskFamily.INTERVENTION_CONSEQUENCE and action_kind in {
+        ActionKind.NOOP,
+        ActionKind.WAIT,
+    }:
+        return "Which outcome is observed under this unchanged control?"
     return {
         LiteralTaskFamily.DIRECT_OUTCOME: "Which direct outcome follows?",
         LiteralTaskFamily.INTERVENTION_CONSEQUENCE: (
@@ -402,6 +423,8 @@ def narrative_facts(
         intervention_kind=spec.intervention_kind,
         source_mechanism=source,
         target_mechanism=target,
+        actual_action_kind=actual_actions[0].kind,
+        counterfactual_action_kind=counterfactual_actions[0].kind,
         actual_scene_clause=_scene_clause(
             spec.schema_identity, actual_state, spec.side, spec.direction
         ),
@@ -413,7 +436,7 @@ def narrative_facts(
             counterfactual_actions[0], counterfactual_state, side=spec.side
         ),
         source_mapping_clause=source_mapping_clause,
-        task_family_question=_task_question(spec.task_family),
+        task_family_question=_task_question(spec.task_family, actual_actions[0].kind),
         instructions="Choose exactly one literal outcome.",
     )
 
@@ -622,14 +645,19 @@ def structural_signatures(
         "counterfactual-intervention", counterfactual_payload
     )
     target_mechanism_hash = structural_signature_hash("mechanism-identity", mechanism_payload)
+    target_mechanism_kind_hash = mechanism_kind_signature(target_mechanism(spec.scenario_case))
     if spec.task_family is LiteralTaskFamily.PHYSICAL_ANALOGY:
         if analogy_source is None:
             raise ValueError("Physical analogy signatures require the declared L1 source witness")
         source_mechanism_hash = analogy_source.structural_signatures.target_mechanism_sha256
+        source_mechanism_kind_hash = (
+            analogy_source.structural_signatures.target_mechanism_kind_sha256
+        )
     else:
         if analogy_source is not None:
             raise ValueError("Only physical analogies may receive a source witness")
         source_mechanism_hash = target_mechanism_hash
+        source_mechanism_kind_hash = target_mechanism_kind_hash
     template_identity = structural_signature_hash(
         "prompt-template",
         {"template_id": template.template_id, "template_sha256": template_hash(template)},
@@ -643,6 +671,7 @@ def structural_signatures(
             "action": action_hash,
             "counterfactual": counterfactual_hash,
             "target_mechanism": target_mechanism_hash,
+            "target_mechanism_kind": target_mechanism_kind_hash,
             "observation": observation_hash,
         },
     )
@@ -682,6 +711,7 @@ def structural_signatures(
         {
             "causal_scenario": causal_scenario_hash,
             "source_mechanism": source_mechanism_hash,
+            "source_mechanism_kind": source_mechanism_kind_hash,
             "template": template_identity,
         },
     )
@@ -692,6 +722,8 @@ def structural_signatures(
         counterfactual_intervention_sha256=counterfactual_hash,
         source_mechanism_sha256=source_mechanism_hash,
         target_mechanism_sha256=target_mechanism_hash,
+        source_mechanism_kind_sha256=source_mechanism_kind_hash,
+        target_mechanism_kind_sha256=target_mechanism_kind_hash,
         prompt_template_sha256=template_identity,
         observation_structure_sha256=observation_hash,
         configuration_sha256=configuration_hash,

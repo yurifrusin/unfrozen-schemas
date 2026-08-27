@@ -29,6 +29,7 @@ from unfrozen_schemas.evaluation.benchmark_validation import (
 )
 from unfrozen_schemas.evaluation.literal_contracts import (
     intervention_contract,
+    mechanism_kind_signature,
     narrative_facts,
     render_literal_prompt,
     structural_signatures,
@@ -116,16 +117,54 @@ _RAW_VISIBLE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 _CAUSAL_TERM_ALLOWLIST: tuple[str, ...] = (
     "aligned",
-    "anchor",
+    "blocked",
+    "changing",
     "closed",
-    "container",
     "cut",
+    "disabled",
+    "downward",
+    "elevated",
+    "enabled",
+    "enough",
     "falls",
-    "inside",
-    "opening",
-    "outside",
-    "platform",
-    "tether",
+    "fully",
+    "load-bearing",
+    "movement",
+    "moves",
+    "not",
+    "observed",
+    "open",
+    "removed",
+    "removing",
+    "small",
+    "stays",
+    "taut",
+    "too",
+    "unchanged",
+    "wide",
+)
+
+_PHYSICAL_MECHANISM_TERMS: frozenset[str] = frozenset(
+    {
+        "anchor",
+        "aperture",
+        "boundary",
+        "contact",
+        "container",
+        "bearing",
+        "non-load",
+        "opening",
+        "perimeter",
+        "platform",
+        "side-touching",
+        "support",
+        "tether",
+        "touches",
+    }
+)
+
+_DIRECTION_ORIENTATION_TERMS: frozenset[str] = frozenset(
+    {"bottom", "inside", "inward", "left", "outside", "outward", "right", "top"}
 )
 
 _TASK_META_TERMS: frozenset[str] = frozenset(
@@ -135,24 +174,36 @@ _TASK_META_TERMS: frozenset[str] = frozenset(
         "alternative",
         "and",
         "another",
+        "anything",
         "apply",
         "as",
         "at",
         "actual",
         "before",
+        "begins",
+        "but",
         "causal",
+        "consequence",
         "consider",
+        "control",
         "described",
         "exactly",
         "following",
+        "for",
+        "has",
         "happens",
         "in",
         "is",
+        "its",
         "next",
+        "no",
         "now",
         "object",
         "of",
         "one",
+        "on",
+        "or",
+        "occurs",
         "otherwise",
         "outcome",
         "pattern",
@@ -161,13 +212,22 @@ _TASK_META_TERMS: frozenset[str] = frozenset(
         "same",
         "setup",
         "setups",
+        "stated",
+        "step",
+        "s",
+        "that",
         "the",
         "then",
+        "there",
+        "this",
         "to",
         "two",
+        "under",
         "what",
         "when",
         "which",
+        "with",
+        "without",
     }
 )
 
@@ -195,6 +255,53 @@ def _normalise_text(value: str) -> str:
 
 def _tokens(value: str) -> tuple[str, ...]:
     return tuple(re.findall(r"[a-z]+(?:-[a-z]+)?", _normalise_text(value)))
+
+
+def _sentence_ngrams(value: str) -> Counter[str]:
+    """Return unigrams/bigrams without crossing punctuation or line boundaries."""
+
+    normalised = unicodedata.normalize(
+        "NFC", value.replace("\r\n", "\n").replace("\r", "\n")
+    ).casefold()
+    result: Counter[str] = Counter()
+    for sentence in re.split(r"(?:[.!?]+|\n+)", normalised):
+        tokens = _tokens(sentence)
+        result.update(tokens)
+        result.update(f"{first} {second}" for first, second in pairwise(tokens))
+    return result
+
+
+def _lexical_category(value: str) -> LiteralLexicalCategory:
+    parts = set(value.split())
+    if parts & _DIRECTION_ORIENTATION_TERMS:
+        return LiteralLexicalCategory.NUISANCE_DIRECTION_ORIENTATION_VOCABULARY
+    content = parts - _TASK_META_TERMS
+    if content & _PHYSICAL_MECHANISM_TERMS:
+        return LiteralLexicalCategory.PHYSICAL_MECHANISM_CORRELATION
+    if content and content <= set(_CAUSAL_TERM_ALLOWLIST):
+        return LiteralLexicalCategory.NECESSARY_CAUSAL_CONDITION_VOCABULARY
+    if not content:
+        return LiteralLexicalCategory.TASK_META_VOCABULARY
+    return LiteralLexicalCategory.RENDERER_GRAMMATICAL_CONSTRUCTION_CUE
+
+
+def _association_disposition(
+    category: LiteralLexicalCategory, semantic_group_support: int
+) -> LiteralAuditStatus:
+    if semantic_group_support < 2 or category is LiteralLexicalCategory.TASK_META_VOCABULARY:
+        return LiteralAuditStatus.PASS
+    if category in {
+        LiteralLexicalCategory.NECESSARY_CAUSAL_CONDITION_VOCABULARY,
+        LiteralLexicalCategory.PHYSICAL_MECHANISM_CORRELATION,
+    }:
+        return LiteralAuditStatus.OWNER_REVIEW_REQUIRED
+    if category in {
+        LiteralLexicalCategory.NUISANCE_DIRECTION_ORIENTATION_VOCABULARY,
+        LiteralLexicalCategory.RENDERER_GRAMMATICAL_CONSTRUCTION_CUE,
+        LiteralLexicalCategory.AUDIT_BOUNDARY_ARTIFACT,
+    }:
+        return LiteralAuditStatus.FAIL
+    return LiteralAuditStatus.PASS
 
 
 def _count(values: Iterable[str]) -> dict[str, int]:
@@ -264,6 +371,7 @@ def build_lexical_audit(
         }
         membership_sha256 = hashlib.sha256(canonical_logical_bytes(membership)).hexdigest()
         identity = {
+            "category_version": "literal-lexical-category-v2",
             "category": category.value,
             "finding_kind": finding_kind,
             "scope": scope,
@@ -366,7 +474,7 @@ def build_lexical_audit(
                 for option in item.model_visible.ordered_options
             ):
                 add_finding(
-                    category=LiteralLexicalCategory.ANSWER_CORRELATED_WORDING,
+                    category=LiteralLexicalCategory.RENDERER_GRAMMATICAL_CONSTRUCTION_CUE,
                     finding_kind="prompt-states-option-consequence",
                     scope=item.item_id,
                     value="option text appears in prompt",
@@ -381,7 +489,7 @@ def build_lexical_audit(
             ]
             if max(pair_lengths) - min(pair_lengths) > 1:
                 add_finding(
-                    category=LiteralLexicalCategory.ANSWER_CORRELATED_WORDING,
+                    category=LiteralLexicalCategory.RENDERER_GRAMMATICAL_CONSTRUCTION_CUE,
                     finding_kind="option-length-imbalance",
                     scope=item.item_id,
                     value=str(pair_lengths),
@@ -394,7 +502,7 @@ def build_lexical_audit(
             observed_styles = {style(option.text) for option in item.model_visible.ordered_options}
             if len(observed_styles) != 1:
                 add_finding(
-                    category=LiteralLexicalCategory.ANSWER_CORRELATED_WORDING,
+                    category=LiteralLexicalCategory.RENDERER_GRAMMATICAL_CONSTRUCTION_CUE,
                     finding_kind="option-style-imbalance",
                     scope=item.item_id,
                     value="grammaticality-specificity-or-modality-style-differs",
@@ -425,9 +533,7 @@ def build_lexical_audit(
             if option.option_id == binding.stable_correct_option_id
         )
         option_styles[binding.stable_correct_option_id][style(correct_option.text)] += 1
-        prompt_tokens = _tokens(left.model_visible.prompt)
-        ngrams = Counter(prompt_tokens)
-        ngrams.update(f"{first} {second}" for first, second in pairwise(prompt_tokens))
+        ngrams = _sentence_ngrams(left.model_visible.prompt)
         for token, count in ngrams.items():
             key = (binding.task_family.value, token)
             association_counts[key][binding.stable_correct_option_id] += count
@@ -456,19 +562,8 @@ def build_lexical_audit(
         if len(counts) != 1:
             continue
         association_group_ids = association_groups[(family, token)]
-        parts = set(token.split())
-        if parts <= set(_CAUSAL_TERM_ALLOWLIST):
-            category = LiteralLexicalCategory.NECESSARY_CAUSAL_VOCABULARY
-        elif parts <= _TASK_META_TERMS:
-            category = LiteralLexicalCategory.TASK_META_VOCABULARY
-        else:
-            category = LiteralLexicalCategory.ANSWER_CORRELATED_WORDING
-        disposition = (
-            LiteralAuditStatus.OWNER_REVIEW_REQUIRED
-            if category is LiteralLexicalCategory.ANSWER_CORRELATED_WORDING
-            and len(association_group_ids) >= 2
-            else LiteralAuditStatus.PASS
-        )
+        category = _lexical_category(token)
+        disposition = _association_disposition(category, len(association_group_ids))
         add_finding(
             category=category,
             finding_kind="family-lexical-association",
@@ -510,16 +605,19 @@ def build_lexical_audit(
                     }[label]
                     == group
                 ]
+                category = (
+                    LiteralLexicalCategory.PHYSICAL_MECHANISM_CORRELATION
+                    if label in {"source-mechanism", "target-mechanism"}
+                    else LiteralLexicalCategory.NECESSARY_CAUSAL_CONDITION_VOCABULARY
+                    if label == "action-word"
+                    else LiteralLexicalCategory.RENDERER_GRAMMATICAL_CONSTRUCTION_CUE
+                )
                 add_finding(
-                    category=LiteralLexicalCategory.ANSWER_CORRELATED_WORDING,
+                    category=category,
                     finding_kind=f"{label}-single-answer-class",
                     scope=group,
                     value=next(iter(answer_counts)),
-                    disposition=(
-                        LiteralAuditStatus.OWNER_REVIEW_REQUIRED
-                        if sum(answer_counts.values()) >= 2
-                        else LiteralAuditStatus.PASS
-                    ),
+                    disposition=_association_disposition(category, len(member_bindings)),
                     semantic_group_ids=(b.semantic_group_id for b in member_bindings),
                     item_ids=(item_id for b in member_bindings for item_id in b.item_ids),
                     answer_class_counts=answer_counts,
@@ -530,7 +628,7 @@ def build_lexical_audit(
             binding for binding in bindings if binding.semantic_group_id in {left_id, right_id}
         )
         add_finding(
-            category=LiteralLexicalCategory.DUPLICATE_WORDING,
+            category=LiteralLexicalCategory.DUPLICATE_MATCHED_WORDING,
             finding_kind="near-prompt-duplicate",
             scope="semantic-groups",
             value=f"{left_id}|{right_id}",
@@ -552,7 +650,7 @@ def build_lexical_audit(
             len(causal_scenarios) == 1 and len(matched_strata) == 1 and None not in matched_strata
         )
         add_finding(
-            category=LiteralLexicalCategory.DUPLICATE_WORDING,
+            category=LiteralLexicalCategory.DUPLICATE_MATCHED_WORDING,
             finding_kind="exact-prompt-duplicate",
             scope="semantic-groups",
             value=f"{left_id}|{right_id}",
@@ -607,7 +705,7 @@ def build_lexical_audit(
         category_hash = hashlib.sha256(
             canonical_logical_bytes(
                 {
-                    "category_version": "literal-lexical-category-v1",
+                    "category_version": "literal-lexical-category-v2",
                     "category": category.value,
                     "finding_ids": finding_ids,
                 }
@@ -753,6 +851,20 @@ def build_split_audit(
     )
     if expected_prohibited != set(partition_plan.prohibited_mechanism_transfer_target_signatures):
         raise ValueError("Partition plan omits a prohibited mechanism-transfer source signature")
+    complete_l1_mechanism_kinds = {
+        item.structural_signatures.target_mechanism_kind_sha256 for item in l1
+    }
+    if complete_l1_mechanism_kinds != set(
+        partition_plan.prohibited_l1_source_mechanism_kind_signatures
+    ):
+        raise ValueError("Partition plan does not bind the complete L1 mechanism-kind set")
+    expected_prohibited_kinds = complete_l1_mechanism_kinds | set(
+        partition_plan.prospective_adaptation_source_mechanism_kind_signatures
+    )
+    if expected_prohibited_kinds != set(
+        partition_plan.prohibited_mechanism_transfer_target_kind_signatures
+    ):
+        raise ValueError("Partition plan omits a prohibited mechanism-transfer source kind")
     for binding in l2:
         if binding.partition is LiteralPartition.L2_NOVEL_TEMPLATE:
             if binding.prompt_template_id in l1_templates:
@@ -771,6 +883,8 @@ def build_split_audit(
                 binding.source_mechanism is not reference.target_mechanism
                 or binding.structural_signatures.source_mechanism_sha256
                 != reference.structural_signatures.target_mechanism_sha256
+                or binding.structural_signatures.source_mechanism_kind_sha256
+                != reference.structural_signatures.target_mechanism_kind_sha256
             ):
                 raise ValueError("Physical analogy source identity is not its L1 reference")
             if (
@@ -780,11 +894,21 @@ def build_split_audit(
                 raise ValueError(
                     "Mechanism-transfer target is represented in prohibited source material"
                 )
+            expected_target_kind = mechanism_kind_signature(binding.target_mechanism)
+            if binding.structural_signatures.target_mechanism_kind_sha256 != expected_target_kind:
+                raise ValueError("Mechanism-transfer target kind identity does not reconstruct")
+            if expected_target_kind in expected_prohibited_kinds:
+                raise ValueError(
+                    "Mechanism-transfer target kind is represented in prohibited "
+                    "mechanism-kind source material"
+                )
             if (
-                binding.structural_signatures.source_mechanism_sha256
-                == binding.structural_signatures.target_mechanism_sha256
+                binding.structural_signatures.source_mechanism_kind_sha256
+                == binding.structural_signatures.target_mechanism_kind_sha256
             ):
-                raise ValueError("Physical analogy lacks a distinct source-to-target mapping")
+                raise ValueError(
+                    "Physical analogy lacks a distinct source-to-target mechanism-kind mapping"
+                )
 
     causal_groups: dict[str, list[LiteralItemBinding]] = defaultdict(list)
     structural_groups: dict[str, list[LiteralItemBinding]] = defaultdict(list)

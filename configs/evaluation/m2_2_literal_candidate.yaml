@@ -1,9 +1,9 @@
-schema_version: "1"
+schema_version: "2"
 candidate_version: m2-2-literal-candidate-v1
 purpose: outcome
 environment_version: schemaworld-core-v1
-generator_version: literal-generator-v2
-partition_plan_version: literal-partition-plan-v2
+generator_version: literal-generator-v3
+partition_plan_version: literal-partition-plan-v3
 authoring_manifest: benchmarks/source/m2-2-literal-candidate-v1/literal_authoring.json
 source_root: benchmarks/source/m2-2-literal-candidate-v1
 candidate_root: benchmarks/private/m2-2-literal-candidate-v1
@@ -72,6 +72,7 @@ coverage:
     - novel-literal-template
     - novel-literal-configuration
     - literal-physical-mechanism-analogy
+  required_groups_per_task_family: 8
   minimum_groups_per_schema: 24
   minimum_groups_per_schema_level: 12
 execution:

@@ -23,9 +23,11 @@ The following remain outside M2.2:
 - any Phase I gate status or empirical LLM claim.
 
 The prospective adaptation strata, semantic-group IDs, and prompt-template IDs are reserved before
-treatment authoring. The retained snapshot also declares the complete prospective adaptation-source
-mechanism-signature set. M2.2 records future treatment overlap as `not_assessed_m2_2`; it never
-treats an empty field as evidence that overlap was checked.
+treatment authoring. The retained snapshot also declares complete prospective adaptation-source
+sets for both configuration-specific mechanism signatures and coarse typed mechanism-kind
+identities. M2.2 records future treatment overlap as `not_assessed_m2_2`; it never treats an empty
+field as evidence that overlap was checked. The outcome configuration requires exactly eight groups
+in each of the six authorised task families.
 
 ## Private storage and execution order
 
@@ -62,8 +64,11 @@ The renderer uses the constant neutral referent `the object` in prompts and opti
 remain private authoring metadata and are never model-visible. Natural questions do not announce
 held-out, novel, or transfer status. Physical analogy prompts state a source causal episode and ask
 for the outcome in a distinct target episode; they do not state the target mechanism as the answer.
-All option pairs use prospectively parallel sentence form, punctuation, modality, and closely
-matched whitespace length. Tokenizer-specific length checks remain an explicit pending M2.4 duty.
+Intervention-consequence questions are derived from the typed actual action. A `NOOP` or `WAIT`
+record uses the exact unchanged-control question and cannot claim that an intervention occurred or
+caused the observed outcome. All option pairs use prospectively parallel sentence form, punctuation,
+modality, and closely matched whitespace length. Tokenizer-specific length checks remain an explicit
+pending M2.4 duty.
 
 Model-visible content is rejected if it contains raw entity/boundary/opening/tether IDs, 64-character
 hashes, raw four-digit coordinates, privileged machine schema labels, transition fields, or abstract/
@@ -102,27 +107,38 @@ any bound semantic field fails even when affected hashes are refreshed.
 
 ## Cue and split audits
 
-The deterministic lexical audit normalises Unicode, line endings, whitespace, and case; checks raw
+The deterministic lexical audit normalises Unicode, line endings, whitespace, and case; constructs
+unigrams and bigrams within sentence and line boundaries only; checks raw
 identifier/hash/coordinate exclusion, option length and answer-position balance, exact and near
 duplicates, template/action/source-mechanism/target-mechanism answer classes, and per-family
 token/outcome associations. Every association records occurrence support, semantic-group support,
 answer-class counts, and enumerated item/group membership. Support-one observations remain recorded
 but do not require individual owner acceptance. Versioned categories distinguish necessary causal
-vocabulary, task/meta vocabulary, nuisance identifiers, answer-correlated wording, and duplicate or
-near-duplicate wording. Each category binds its sorted finding IDs with a reconstructible membership
-hash; category-level disposition is permitted only for that exact membership. Consequential
-findings remain item-addressable. Prompt length and option length/style are compared by correct
-answer class. Integrity failures fail generation.
+condition vocabulary, physical-mechanism correlation, nuisance direction/orientation vocabulary,
+renderer or grammatical-construction cues, audit-boundary artifacts, task/meta vocabulary, nuisance
+identifiers, and duplicate or matched wording. Every finding has an exact membership hash; each
+subcategory binds its sorted finding IDs with a reconstructible membership hash. Owner disposition
+can bind either that exact subcategory membership or an exact consequential finding ID. Intrinsic
+causal/mechanism associations remain explicit construct features requiring owner review; repeated
+nuisance direction or renderer cues fail and must be rewritten or rebalanced. Exact cosmetic
+duplicates remain non-independent variants and preserve M2.4 clustering/weighting obligations.
+Prompt length and option length/style are compared by correct answer class. Integrity failures fail
+generation.
 
 The split audit requires exact L1/L2 state, observation, action, group, and witness identities to be
 disjoint. Seed-, noise-, entity-ID-, and filesystem-independent signatures cover world topology,
 qualitative geometry, actions, counterfactual intervention, mechanism mapping, templates,
 observation structure, target causal scenario, order-independent structural stratum, and combined
-witness configuration. Novel templates are withheld from L1;
+witness configuration. Configuration-specific source/target mechanism signatures remain available
+for provenance and split analysis. A separate versioned mechanism-kind hash depends only on the
+typed physical mechanism and excludes side, direction, action instance, seed, outcome, and wording.
+Novel templates are withheld from L1;
 novel configurations have a qualitative signature absent from L1; physical analogies change the
 declared mechanism mapping relative to their same-schema L1 reference. Every L2 mechanism-transfer
-target is rejected if its target signature occurs anywhere in the complete L1 or prospective
-adaptation-source prohibited sets. Repeated causal scenarios require one explicit matched stratum.
+target is rejected if either its target configuration signature or target mechanism-kind identity
+occurs anywhere in the respective complete L1 or prospective adaptation-source prohibited set. Its
+selected L1 witness must instantiate the bound source kind, and source and target kinds must differ.
+Repeated causal scenarios require one explicit matched stratum.
 The audit reports question groups, unique causal scenarios, independent structural strata,
 cross-family matched variants, and same-family cosmetic variants separately. Only genuine causal
 scenarios and declared cross-family variants satisfy the scientific coverage floors; cosmetic
