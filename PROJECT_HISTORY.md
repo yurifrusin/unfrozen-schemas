@@ -313,6 +313,22 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
   clean-head private evidence regeneration remain pending in this correction task. No merge, tag,
   release, freeze, M2.3, model/GPU, treatment, scientific result, or EPS work occurred.
 
+### 2026-08-27 — M2.2 canonical-root alias correction
+
+- Continued pull request `#7` from exact reviewed head
+  `211d6abef34f7fd2a4927a7418f3bf4f1f25221d` after clean branch/upstream, pull-request,
+  canonical-base, and protected CPU-check preflight.
+- Corrected `US-PR0007-ER-0002` so non-engineering outcome source and review roots require exact
+  normalized absolute lexical identity before resolution, and reject symbolic-link, junction, or
+  other reparse-point components through `lstat` metadata before resolved containment checks.
+- Retained canonical relative/absolute spellings and authorised engineering overrides, while adding
+  public-validator and CLI regressions for direct canonical aliases, moved copies, and governed
+  intermediate aliases on POSIX and Windows.
+- Status: full local verification, the bounded correction commit, exact-head protected CI, private
+  evidence regeneration, and metadata-only pull-request correction remain pending. No scientific
+  content, merge, tag, release, freeze, M2.3, model/GPU, treatment, scientific result, cue
+  disposition, closeout, or EPS work occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

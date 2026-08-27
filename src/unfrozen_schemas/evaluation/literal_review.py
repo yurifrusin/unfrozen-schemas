@@ -67,6 +67,7 @@ from unfrozen_schemas.evaluation.literal_validation import (
     validate_literal_root_location,
     validate_loaded_literal_source,
 )
+from unfrozen_schemas.literal_config import reject_literal_path_aliases
 from unfrozen_schemas.provenance import (
     capture_git_state,
     collect_package_versions,
@@ -85,9 +86,10 @@ def _candidate_report(
     loaded: LoadedLiteralSource,
     *,
     enforce_source_location: bool = True,
+    observed_source_root: Path | None = None,
 ) -> LiteralValidationReport:
     source_report = (
-        validate_loaded_literal_source(loaded)
+        validate_loaded_literal_source(loaded, observed_root=observed_source_root)
         if enforce_source_location
         else _validate_loaded_literal_source_content(loaded)
     )
@@ -240,10 +242,12 @@ def _validate_literal_benchmark(
     repository = (
         find_repository_root(Path.cwd()) if repository_root is None else repository_root.resolve()
     )
+    reject_literal_path_aliases(source_root, label="source_root")
     loaded = load_literal_source(source_root)
     report = _candidate_report(
         loaded,
         enforce_source_location=enforce_source_location,
+        observed_source_root=source_root,
     )
     validated = validate_benchmark_manifest(
         candidate_manifest_path,
@@ -317,9 +321,10 @@ def materialize_literal_candidate(
     repository = (
         find_repository_root(Path.cwd()) if repository_root is None else repository_root.resolve()
     )
-    source = source_root.resolve()
-    loaded = load_literal_source(source)
-    validate_loaded_literal_source(loaded)
+    reject_literal_path_aliases(source_root, label="source_root")
+    loaded = load_literal_source(source_root)
+    validate_loaded_literal_source(loaded, observed_root=source_root)
+    source = loaded.root
     if any(path.exists() for path in _materialized_paths(source)):
         raise FileExistsError("Literal candidate materialization is write-once")
     validated = validate_benchmark_manifest(candidate_manifest_path, repository_root=repository)
@@ -487,8 +492,9 @@ def _load_materialized_source(
     LiteralValidationReport,
     LiteralOperationRecord,
 ]:
+    reject_literal_path_aliases(source_root, label="source_root")
     loaded = load_literal_source(source_root)
-    validate_loaded_literal_source(loaded)
+    validate_loaded_literal_source(loaded, observed_root=source_root)
     report_path, composite_path, operation_path = _materialized_paths(loaded.root)
     if not all(path.is_file() for path in (report_path, composite_path, operation_path)):
         raise ValueError("Literal candidate has not been atomically materialized")
@@ -982,12 +988,14 @@ def build_literal_review(*, source_root: Path, output_root: Path) -> LiteralOper
     """Atomically build a private review bundle with full and zoomed renders."""
 
     loaded, composite, report, materialization = _load_materialized_source(source_root)
-    output = output_root.resolve()
+    reject_literal_path_aliases(output_root, label="review_root")
     validate_literal_root_location(
         loaded,
-        observed_root=output,
+        observed_root=output_root,
         root_kind="review",
+        must_exist=False,
     )
+    output = output_root.resolve()
     if output.exists():
         raise FileExistsError(f"Literal review destination already exists: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -1407,13 +1415,14 @@ def _validate_literal_review_content(
 def validate_literal_review(*, review_root: Path, source_root: Path) -> LiteralReviewManifest:
     """Read back a review bundle only at configured non-engineering roots."""
 
-    root = review_root.resolve()
+    reject_literal_path_aliases(review_root, label="review_root")
     loaded, composite, report, materialization = _load_materialized_source(source_root)
     validate_literal_root_location(
         loaded,
-        observed_root=root,
+        observed_root=review_root,
         root_kind="review",
     )
+    root = review_root.resolve()
     return _validate_literal_review_content(
         root=root,
         loaded=loaded,
@@ -1431,8 +1440,9 @@ def inspect_literal_item(
 ) -> dict[str, Any]:
     """Explicitly inspect one private item, optionally writing an after-state render."""
 
+    reject_literal_path_aliases(source_root, label="source_root")
     loaded = load_literal_source(source_root)
-    validate_loaded_literal_source(loaded)
+    validate_loaded_literal_source(loaded, observed_root=source_root)
     item = next((candidate for candidate in loaded.items if candidate.item_id == item_id), None)
     if item is None:
         raise ValueError(f"Unknown private literal item ID: {item_id}")

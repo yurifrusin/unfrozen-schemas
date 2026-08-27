@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -92,6 +94,46 @@ class LoadedLiteralConfig:
     review_root: Path
 
 
+def normalise_literal_lexical_path(path: Path) -> Path:
+    """Return an absolute platform-normal path without following aliases."""
+
+    return Path(os.path.normcase(os.path.abspath(os.path.normpath(os.fspath(path)))))
+
+
+def reject_literal_path_aliases(
+    path: Path,
+    *,
+    label: str,
+    governed_root: Path | None = None,
+) -> None:
+    """Reject symlink, junction, and reparse-point components without dereferencing them."""
+
+    lexical = normalise_literal_lexical_path(path)
+    if governed_root is None:
+        anchor = Path(lexical.anchor)
+        components = lexical.parts[1:]
+    else:
+        anchor = normalise_literal_lexical_path(governed_root)
+        try:
+            components = lexical.relative_to(anchor).parts
+        except ValueError as exc:
+            raise ConfigLoadError(f"Literal {label} lexical path escapes the repository") from exc
+    current = anchor
+    reparse_attribute = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    for component in components:
+        current /= component
+        try:
+            metadata = os.lstat(current)
+        except FileNotFoundError:
+            break
+        file_attributes = int(getattr(metadata, "st_file_attributes", 0))
+        if stat.S_ISLNK(metadata.st_mode) or file_attributes & reparse_attribute:
+            raise ConfigLoadError(
+                f"Literal {label} contains a symbolic-link, junction, or reparse-point "
+                f"component: {current}"
+            )
+
+
 def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise ConfigLoadError(f"Literal configuration file does not exist: {path}")
@@ -129,6 +171,26 @@ def load_literal_config(
     except ValueError as exc:
         raise ConfigLoadError("Literal configuration must reside inside the repository") from exc
 
+    expected_source = repository_root / "benchmarks" / "source" / config.candidate_version
+    expected_review = repository_root / "reports" / "private" / config.candidate_version
+    if config.purpose == "outcome":
+        configured_source = normalise_literal_lexical_path(repository_root / config.source_root)
+        configured_review = normalise_literal_lexical_path(repository_root / config.review_root)
+        if configured_source != normalise_literal_lexical_path(expected_source):
+            raise ConfigLoadError("Outcome literal source_root must use the canonical source path")
+        if configured_review != normalise_literal_lexical_path(expected_review):
+            raise ConfigLoadError("Outcome literal review_root must use the canonical private path")
+        reject_literal_path_aliases(
+            expected_source,
+            label="source_root",
+            governed_root=repository_root,
+        )
+        reject_literal_path_aliases(
+            expected_review,
+            label="review_root",
+            governed_root=repository_root,
+        )
+
     authoring = _resolve_repository_path(
         repository_root, config.authoring_manifest, label="authoring_manifest"
     )
@@ -152,8 +214,6 @@ def load_literal_config(
     )
     review_root = review_root_override.resolve() if review_root_override else default_review
 
-    expected_source = repository_root / "benchmarks" / "source" / config.candidate_version
-    expected_review = repository_root / "reports" / "private" / config.candidate_version
     if config.purpose == "outcome":
         expected_candidate = repository_root / "benchmarks" / "private" / config.candidate_version
         if source_root != expected_source.resolve():

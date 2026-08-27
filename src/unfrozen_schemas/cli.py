@@ -653,20 +653,14 @@ def generate_literal_source_command(
 @app.command("validate-literal-source")
 def validate_literal_source_command(
     source: Annotated[
-        Path,
-        typer.Option(
-            "--source",
-            exists=True,
-            file_okay=False,
-            dir_okay=True,
-            readable=True,
-        ),
+        str,
+        typer.Option("--source"),
     ],
 ) -> None:
     """Read-only reconstruction of one private literal source and every witness."""
 
     try:
-        loaded = validate_literal_source(source)
+        loaded = validate_literal_source(Path(source))
     except Exception as exc:
         typer.echo(f"Literal source validation failed: {type(exc).__name__}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -854,30 +848,18 @@ def build_literal_review_command(
 @app.command("validate-literal-review")
 def validate_literal_review_command(
     review: Annotated[
-        Path,
-        typer.Option(
-            "--review",
-            exists=True,
-            file_okay=False,
-            dir_okay=True,
-            readable=True,
-        ),
+        str,
+        typer.Option("--review"),
     ],
     source: Annotated[
-        Path,
-        typer.Option(
-            "--source",
-            exists=True,
-            file_okay=False,
-            dir_okay=True,
-            readable=True,
-        ),
+        str,
+        typer.Option("--source"),
     ],
 ) -> None:
     """Read back a private review bundle and verify every retained file."""
 
     try:
-        manifest = validate_literal_review(review_root=review, source_root=source)
+        manifest = validate_literal_review(review_root=Path(review), source_root=Path(source))
     except Exception as exc:
         typer.echo(f"Literal review validation failed: {type(exc).__name__}: {exc}", err=True)
         raise typer.Exit(code=1) from exc

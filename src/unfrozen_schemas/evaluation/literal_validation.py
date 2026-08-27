@@ -74,6 +74,10 @@ from unfrozen_schemas.evaluation.literal_models import (
     LiteralWitnessBundle,
     LiteralWitnessRecord,
 )
+from unfrozen_schemas.literal_config import (
+    normalise_literal_lexical_path,
+    reject_literal_path_aliases,
+)
 
 LITERAL_DIRECTORY = ".literal"
 AUTHORING_SNAPSHOT_FILE = "authoring_snapshot.json"
@@ -1229,6 +1233,7 @@ def validate_literal_root_location(
     *,
     observed_root: Path,
     root_kind: Literal["source", "review"],
+    must_exist: bool = True,
 ) -> None:
     """Require outcome artifacts to occupy their tracked canonical root."""
 
@@ -1236,7 +1241,7 @@ def validate_literal_root_location(
         return
     from unfrozen_schemas.config import find_repository_root
 
-    repository = find_repository_root(Path.cwd()).resolve()
+    repository = normalise_literal_lexical_path(find_repository_root(Path.cwd()).resolve())
     key = f"{root_kind}_root"
     configured_value = loaded.source_bundle.resolved_configuration.get(key)
     if not isinstance(configured_value, str) or not configured_value:
@@ -1244,15 +1249,44 @@ def validate_literal_root_location(
     configured_path = Path(configured_value)
     if configured_path.is_absolute():
         raise ValueError(f"Outcome literal configured {key} must be repository-relative")
-    expected = (repository / configured_path).resolve()
-    if not expected.is_relative_to(repository):
-        raise ValueError(f"Outcome literal configured {key} escapes the repository")
-    observed = observed_root.resolve()
+    expected_relative = (
+        Path("benchmarks") / "source" / loaded.source_manifest.benchmark_version
+        if root_kind == "source"
+        else Path("reports") / "private" / loaded.source_manifest.benchmark_version
+    )
+    expected = normalise_literal_lexical_path(repository / expected_relative)
+    configured = normalise_literal_lexical_path(repository / configured_path)
+    if configured != expected:
+        raise ValueError(f"Outcome literal configured {key} is not the canonical version path")
+    try:
+        expected.relative_to(repository)
+    except ValueError as exc:
+        raise ValueError(f"Outcome literal configured {key} escapes the repository") from exc
+    observed = normalise_literal_lexical_path(observed_root)
     if observed != expected:
         raise ValueError(
-            f"Outcome literal {key} is outside its configured canonical location: "
+            f"Outcome literal {key} is outside its configured canonical lexical location: "
             f"expected {expected}; observed {observed}"
         )
+    reject_literal_path_aliases(
+        expected,
+        label=key,
+        governed_root=repository,
+    )
+    if must_exist and not expected.is_dir():
+        raise ValueError(f"Outcome literal canonical {key} does not exist: {expected}")
+    resolved_repository = repository.resolve(strict=True)
+    resolved_expected = expected.resolve(strict=must_exist)
+    if not resolved_expected.is_relative_to(resolved_repository):
+        raise ValueError(f"Outcome literal configured {key} escapes the repository")
+    resolved_observed = observed.resolve(strict=must_exist)
+    if resolved_observed != resolved_expected:
+        raise ValueError(
+            f"Outcome literal {key} does not resolve to its canonical target: "
+            f"expected {resolved_expected}; observed {resolved_observed}"
+        )
+    if root_kind == "source" and loaded.root != resolved_expected:
+        raise ValueError("Loaded literal source does not match its canonical target")
 
 
 def _verify_template_registry(
@@ -1654,21 +1688,26 @@ def _validate_loaded_literal_source_content(
 
 def validate_loaded_literal_source(
     loaded: LoadedLiteralSource,
+    *,
+    observed_root: Path | None = None,
 ) -> LiteralValidationReport:
     """Validate source content and the canonical outcome-source location."""
 
+    observed = loaded.root if observed_root is None else observed_root
+    reject_literal_path_aliases(observed, label="source_root")
     report = _validate_loaded_literal_source_content(loaded)
     validate_literal_root_location(
         loaded,
-        observed_root=loaded.root,
+        observed_root=observed,
         root_kind="source",
     )
     return report
 
 
 def validate_literal_source(source_root: Path) -> LoadedLiteralSource:
+    reject_literal_path_aliases(source_root, label="source_root")
     loaded = load_literal_source(source_root)
-    validate_loaded_literal_source(loaded)
+    validate_loaded_literal_source(loaded, observed_root=source_root)
     return loaded
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,7 +13,10 @@ from typing import Any
 import pytest
 from PIL import Image
 from pydantic import ValidationError
+from typer.testing import CliRunner
 
+from unfrozen_schemas.cli import app
+from unfrozen_schemas.config import ConfigLoadError
 from unfrozen_schemas.envs.schema_world.renderer import BACKGROUND
 from unfrozen_schemas.evaluation.benchmark_lifecycle import build_benchmark
 from unfrozen_schemas.evaluation.benchmark_models import BenchmarkPurpose
@@ -686,35 +690,35 @@ def test_review_failure_record_publication_failure_retains_valid_staged_record(
     assert not list(tmp_path.glob(f"..{output.name}.failure-*.staging-*"))
 
 
-def test_outcome_validators_enforce_configured_roots_and_keep_engineering_overrides(
-    tmp_path: Path,
+def _mock_outcome_root_contract(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    *,
+    repository: Path,
+    candidate_version: str,
+) -> dict[str, bool]:
     from unfrozen_schemas import config as config_module
+    from unfrozen_schemas import literal_config as literal_config_module
     from unfrozen_schemas.evaluation import literal_review, literal_validation
 
-    repository = tmp_path / "root-contract-repository"
-    source = repository / "benchmarks" / "source" / "outcome-location-fixture-v1"
-    review = repository / "reports" / "private" / "outcome-location-fixture-v1"
-    source.mkdir(parents=True)
-    review.mkdir(parents=True)
-    (source / "artifact.bin").write_bytes(b"exact source copy")
-    (review / "artifact.bin").write_bytes(b"exact review copy")
     engineering = {"enabled": False}
 
     def fake_loaded(root: Path) -> Any:
         return SimpleNamespace(
             root=root.resolve(),
-            source_manifest=SimpleNamespace(engineering_only=engineering["enabled"]),
+            source_manifest=SimpleNamespace(
+                benchmark_version=candidate_version,
+                engineering_only=engineering["enabled"],
+            ),
             source_bundle=SimpleNamespace(
                 resolved_configuration={
-                    "source_root": "benchmarks/source/outcome-location-fixture-v1",
-                    "review_root": "reports/private/outcome-location-fixture-v1",
+                    "source_root": f"benchmarks/source/{candidate_version}",
+                    "review_root": f"reports/private/{candidate_version}",
                 }
             ),
         )
 
     monkeypatch.setattr(config_module, "find_repository_root", lambda _path: repository)
+    monkeypatch.setattr(literal_config_module, "find_repository_root", lambda _path: repository)
     monkeypatch.setattr(literal_validation, "load_literal_source", fake_loaded)
     monkeypatch.setattr(
         literal_validation,
@@ -731,8 +735,77 @@ def test_outcome_validators_enforce_configured_roots_and_keep_engineering_overri
         "_validate_literal_review_content",
         lambda **_kwargs: SimpleNamespace(),
     )
+    return engineering
+
+
+def _create_windows_junction(alias: Path, target: Path) -> None:
+    completed = subprocess.run(
+        ["cmd.exe", "/c", "mklink", "/J", str(alias), str(target)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        pytest.fail(f"Windows junction creation failed: {completed.stderr or completed.stdout}")
+
+
+def _remove_directory_alias(alias: Path) -> None:
+    if os.path.lexists(alias):
+        try:
+            os.unlink(alias)
+        except (IsADirectoryError, PermissionError):
+            os.rmdir(alias)
+
+
+def test_outcome_validators_accept_canonical_relative_and_absolute_roots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = "outcome-location-fixture-v1"
+    repository = tmp_path / "root-contract-repository"
+    source = repository / "benchmarks" / "source" / version
+    review = repository / "reports" / "private" / version
+    source.mkdir(parents=True)
+    review.mkdir(parents=True)
+    (source / "artifact.bin").write_bytes(b"canonical source")
+    (review / "artifact.bin").write_bytes(b"canonical review")
+    _mock_outcome_root_contract(
+        monkeypatch,
+        repository=repository,
+        candidate_version=version,
+    )
+    monkeypatch.chdir(repository)
+
+    relative_source = Path("benchmarks") / "source" / version
+    relative_review = Path("reports") / "private" / version
+    source_before = _file_snapshot(source)
+    review_before = _file_snapshot(review)
+    validate_literal_source(relative_source)
     validate_literal_source(source)
+    validate_literal_review(review_root=relative_review, source_root=relative_source)
     validate_literal_review(review_root=review, source_root=source)
+    assert _file_snapshot(source) == source_before
+    assert _file_snapshot(review) == review_before
+
+
+def test_outcome_validators_reject_copied_and_moved_roots_and_keep_engineering_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = "outcome-location-fixture-v1"
+    repository = tmp_path / "root-contract-repository"
+    source = repository / "benchmarks" / "source" / version
+    review = repository / "reports" / "private" / version
+    source.mkdir(parents=True)
+    review.mkdir(parents=True)
+    (source / "artifact.bin").write_bytes(b"exact source copy")
+    (review / "artifact.bin").write_bytes(b"exact review copy")
+    engineering = _mock_outcome_root_contract(
+        monkeypatch,
+        repository=repository,
+        candidate_version=version,
+    )
+    monkeypatch.chdir(repository)
 
     outside_source = tmp_path / "copied-outcome-source"
     outside_review = tmp_path / "copied-outcome-review"
@@ -756,18 +829,169 @@ def test_outcome_validators_enforce_configured_roots_and_keep_engineering_overri
     with pytest.raises(ValueError, match=r"review_root.*configured canonical"):
         validate_literal_review(review_root=moved_review, source_root=source)
 
-    alias_candidate = tmp_path / "outcome-source-alias"
-    source_alias: Path | None
-    try:
-        alias_candidate.symlink_to(moved_source, target_is_directory=True)
-    except OSError:
-        source_alias = None
-    else:
-        source_alias = alias_candidate
-    if source_alias is not None:
-        with pytest.raises(ValueError, match=r"source_root.*configured canonical"):
-            validate_literal_source(source_alias)
-
     engineering["enabled"] = True
     validate_literal_source(moved_source)
     validate_literal_review(review_root=moved_review, source_root=moved_source)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link semantics")
+def test_posix_direct_to_canonical_source_and_review_symlinks_are_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = "outcome-location-fixture-v1"
+    repository = tmp_path / "posix-alias-repository"
+    source = repository / "benchmarks" / "source" / version
+    review = repository / "reports" / "private" / version
+    source.mkdir(parents=True)
+    review.mkdir(parents=True)
+    _mock_outcome_root_contract(
+        monkeypatch,
+        repository=repository,
+        candidate_version=version,
+    )
+    monkeypatch.chdir(repository)
+    source_alias = tmp_path / "direct-canonical-source-symlink"
+    review_alias = tmp_path / "direct-canonical-review-symlink"
+    source_alias.symlink_to(source, target_is_directory=True)
+    review_alias.symlink_to(review, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symbolic-link, junction, or reparse-point"):
+        validate_literal_source(source_alias)
+    with pytest.raises(ValueError, match="symbolic-link, junction, or reparse-point"):
+        validate_literal_review(review_root=review_alias, source_root=source)
+    runner = CliRunner()
+    assert runner.invoke(app, ["validate-literal-source", "--source", str(source_alias)]).exit_code
+    assert runner.invoke(
+        app,
+        [
+            "validate-literal-review",
+            "--source",
+            str(source),
+            "--review",
+            str(review_alias),
+        ],
+    ).exit_code
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction semantics")
+def test_windows_direct_to_canonical_source_and_review_junctions_are_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = "outcome-location-fixture-v1"
+    repository = tmp_path / "junction-alias-repository"
+    source = repository / "benchmarks" / "source" / version
+    review = repository / "reports" / "private" / version
+    source.mkdir(parents=True)
+    review.mkdir(parents=True)
+    _mock_outcome_root_contract(
+        monkeypatch,
+        repository=repository,
+        candidate_version=version,
+    )
+    monkeypatch.chdir(repository)
+    source_alias = tmp_path / "direct-canonical-source-junction"
+    review_alias = tmp_path / "direct-canonical-review-junction"
+    _create_windows_junction(source_alias, source)
+    _create_windows_junction(review_alias, review)
+    try:
+        with pytest.raises(ValueError, match="symbolic-link, junction, or reparse-point"):
+            validate_literal_source(source_alias)
+        with pytest.raises(ValueError, match="symbolic-link, junction, or reparse-point"):
+            validate_literal_review(review_root=review_alias, source_root=source)
+        runner = CliRunner()
+        source_result = runner.invoke(
+            app,
+            ["validate-literal-source", "--source", str(source_alias)],
+        )
+        review_result = runner.invoke(
+            app,
+            [
+                "validate-literal-review",
+                "--source",
+                str(source),
+                "--review",
+                str(review_alias),
+            ],
+        )
+        assert source_result.exit_code != 0
+        assert review_result.exit_code != 0
+        assert "reparse-point" in source_result.output
+        assert "reparse-point" in review_result.output
+    finally:
+        _remove_directory_alias(source_alias)
+        _remove_directory_alias(review_alias)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows symbolic-link semantics")
+def test_windows_directory_symlink_aliases_are_rejected_when_creation_is_available(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = "outcome-location-fixture-v1"
+    repository = tmp_path / "windows-symlink-repository"
+    source = repository / "benchmarks" / "source" / version
+    review = repository / "reports" / "private" / version
+    source.mkdir(parents=True)
+    review.mkdir(parents=True)
+    _mock_outcome_root_contract(
+        monkeypatch,
+        repository=repository,
+        candidate_version=version,
+    )
+    monkeypatch.chdir(repository)
+    source_alias = tmp_path / "direct-canonical-source-windows-symlink"
+    review_alias = tmp_path / "direct-canonical-review-windows-symlink"
+    try:
+        source_alias.symlink_to(source, target_is_directory=True)
+        review_alias.symlink_to(review, target_is_directory=True)
+    except OSError as exc:
+        _remove_directory_alias(source_alias)
+        _remove_directory_alias(review_alias)
+        pytest.skip(f"Windows symbolic-link creation is unavailable: {exc}")
+    try:
+        with pytest.raises(ValueError, match="symbolic-link, junction, or reparse-point"):
+            validate_literal_source(source_alias)
+        with pytest.raises(ValueError, match="symbolic-link, junction, or reparse-point"):
+            validate_literal_review(review_root=review_alias, source_root=source)
+    finally:
+        _remove_directory_alias(source_alias)
+        _remove_directory_alias(review_alias)
+
+
+def test_alias_within_governed_canonical_source_components_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    version = "outcome-location-fixture-v1"
+    repository = tmp_path / "governed-component-repository"
+    repository.joinpath("benchmarks").mkdir(parents=True)
+    repository.joinpath("reports", "private", version).mkdir(parents=True)
+    external_source_parent = tmp_path / "governed-source-target"
+    external_source_parent.joinpath(version).mkdir(parents=True)
+    governed_alias = repository / "benchmarks" / "source"
+    if os.name == "nt":
+        _create_windows_junction(governed_alias, external_source_parent)
+    else:
+        governed_alias.symlink_to(external_source_parent, target_is_directory=True)
+    _mock_outcome_root_contract(
+        monkeypatch,
+        repository=repository,
+        candidate_version=version,
+    )
+    config_path = repository / "configs" / "evaluation" / "m2_2_literal_candidate.yaml"
+    config_path.parent.mkdir(parents=True)
+    source_config = Path(__file__).parents[2] / "configs" / "evaluation" / config_path.name
+    shutil.copyfile(source_config, config_path)
+    monkeypatch.chdir(repository)
+    try:
+        with pytest.raises(
+            ConfigLoadError,
+            match="symbolic-link, junction, or reparse-point",
+        ):
+            load_literal_config(config_path)
+        with pytest.raises(ValueError, match="symbolic-link, junction, or reparse-point"):
+            validate_literal_source(Path("benchmarks") / "source" / version)
+    finally:
+        _remove_directory_alias(governed_alias)
