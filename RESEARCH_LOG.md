@@ -283,6 +283,24 @@ These decisions correct candidate construct validity but do not verify the three
 approve private content, or establish human validity, rights, ethics, model transfer, or any Phase I
 result. Independent rereview remains required.
 
+### 2026-08-27 — Owner cue disposition accepts construct language without claiming lexical neutrality
+
+The owner accepted necessary causal-condition vocabulary as language intrinsic to the intended
+literal physical questions and accepted physical-mechanism language as intended construct content.
+Those decisions retain the model-visible causal and mechanism information needed by the literal
+candidate; they do not show that a future model reasons causally rather than exploiting lexical
+associations, and they do not establish lexical neutrality or mechanism-general transfer.
+
+Duplicate or matched wording was accepted only as explicitly non-independent variation. Cosmetic
+variants add no independent causal observations. M2.4 must therefore cluster or weight scoring and
+uncertainty by causal scenario or structural stratum instead of treating those variants as
+independent samples.
+
+Tokenizer-specific option analysis, unchanged-base headroom assessment, broader model-facing cue
+checks, and future treatment-corpus overlap remain pending. Human validation, rights, ethics, and
+future treatment overlap also remain unresolved. The cue disposition does not freeze `v1_core`,
+approve M2.3, establish an empirical result, or constitute a Phase I gate outcome.
+
 ## Entry template
 
 ### YYYY-MM-DD — <decision or observation>
