@@ -1,0 +1,36 @@
+schema_version: "2"
+candidate_version: engineering-literal-fixture-v1
+purpose: engineering
+environment_version: schemaworld-core-v1
+generator_version: literal-generator-v3
+partition_plan_version: literal-partition-plan-v3
+authoring_manifest: tests/fixtures/literal_benchmark/authoring.json
+source_root: tests/fixtures/literal_benchmark/generated-source
+candidate_root: tests/fixtures/literal_benchmark/generated-candidate
+review_root: tests/fixtures/literal_benchmark/generated-review
+generation_seeds: [101, 102, 103, 104, 201, 202, 203, 204]
+coverage:
+  minimum_question_groups: 8
+  minimum_causal_scenarios: 8
+  minimum_independent_structural_strata: 8
+  minimum_matched_variants: 0
+  records_per_group: 2
+  required_schemas: [CONTAINMENT, SUPPORT]
+  required_levels: [L1, L2]
+  required_task_families:
+    - direct-literal-outcome
+    - matched-counterfactual-reasoning
+    - novel-literal-configuration
+    - literal-physical-mechanism-analogy
+  minimum_groups_per_schema: 4
+  minimum_groups_per_schema_level: 2
+execution:
+  device: cpu
+  offline: true
+  network_access: false
+  model_access: false
+  gpu_access: false
+  requires_secret: false
+engineering_only: true
+scientific_eligible: false
+promotable: false

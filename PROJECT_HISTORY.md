@@ -207,6 +207,128 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
 - Advancement decision: M2.2 is the next authorised work package, but it was not begun by this
   closeout. No real benchmark-item authoring, model, tokenizer, training, GPU, or EPS work occurred.
 
+### 2026-08-26 — Milestone 2 M2.2 literal/counterfactual implementation branch
+
+- Began from clean canonical `main` at
+  `ee6fff36317665ce729c870c858f273a6b348894`, after verifying the M2.1 implementation merge
+  `90c3428f70e03c3cf31e3e2309a65a2340f41cd1`, the published Milestone 1 tag/release, the active
+  `main` ruleset, and passing canonical CI.
+- Branch: `codex/milestone-2-m2-2-literal-counterfactuals`.
+- Added strict separately versioned M2.2 records and hash domains layered over the unchanged M2.1
+  source/candidate contracts; deterministic typed source generation; independent actual and
+  counterfactual Core replay; reverse-pair, split, lexical-cue, and provenance validation; composite
+  M2.1/M2.2 identity; private review bundles and renders; CLI/configuration; and CPU/offline tests.
+- Added a tracked non-scientific engineering fixture using synthetic status-code wording. It is
+  non-promotable and contains no real candidate prompt, target-domain item, model, scorer, or GPU
+  dependency.
+- Pull request `#7` first ran CI at head
+  `f7696a5bb96c5cb275727649f8d3227d9a1ef954`. The test suite exposed an operating-system-dependent
+  PNG container hash in the review-manifest logical regression. The correction retains exact local
+  PNG artifact hashes for read-back while binding deterministic raw-pixel hashes in the logical
+  review identity, matching the existing rule that render-container metadata is non-scientific.
+- The real provisional candidate identity is `m2-2-literal-candidate-v1`, purpose `outcome`, with
+  private ignored source, candidate, and review roots. Its generation is deliberately deferred until
+  the tracked branch is final, pushed, clean, and CI-green.
+- Revision 6 `CODEX_SPEC.md` remained unchanged at SHA-256
+  `e5162c4d0e9e9ef54e86820393d99a4766e934cb3feba2bc2ea6a32b5586a911`.
+- Status: implementation in progress. No merge, tag, release, freeze, human recruitment, model/GPU
+  run, treatment, scientific result, Phase I gate decision, M2.3 work, or EPS-worktree change has
+  occurred.
+
+### 2026-08-26 — M2.2 pre-merge semantic and review-integrity correction
+
+- Continued pull request `#7` on `codex/milestone-2-m2-2-literal-counterfactuals` after exact branch,
+  head, upstream, pull-request, canonical-main, clean-tree, and protected CPU-check preflight.
+- Replaced authoritative free causal/narrative prose and positive/negative option conventions with a
+  retained typed authoring snapshot, explicit outcome-code registry, prospective intervention
+  contracts, simulator-derived narrative facts, and seed/ID-independent structural signatures.
+- Added one-to-one snapshot/source/binding/witness reconciliation; verified L1/L2 exact identity
+  separation and L2 structural novelty; corrected lexical findings to remain owner-review pending;
+  and bound operational provenance separately from portable logical roots.
+- Split explicit candidate materialisation from strictly read-only validation. Source generation,
+  candidate materialisation, and review construction now use staged fail-closed publication and
+  governed failure records.
+- Expanded private review records and deterministic inspection to actual/counterfactual before/after
+  renders, decoded Pillow validation, exact PNG artifact hashes, raw-pixel identities, and exact
+  snapshot/operation/manifest owner-binding requirements.
+- Status: tracked correction and local verification are in progress. The private outcome artifacts
+  remain provisional and will be regenerated only from the final pushed, clean, CPU-green head. No
+  merge, tag, release, freeze, M2.3, model/GPU, treatment, or EPS-worktree work occurred.
+
+### 2026-08-26 — M2.2 independent scientific-review correction round
+
+- Continued pull request `#7` from exact reviewed head
+  `6644e47b6af06e84c0e08804aa25b0a588fdf8c4` after clean branch/upstream, canonical-base,
+  pull-request, and protected CPU-check preflight.
+- Implemented the six stable scientific-review findings as `IMPLEMENTED_PENDING_VERIFICATION`:
+  explicit source/target mechanism transfer with complete prohibited-source comparison; separate
+  question, causal-scenario, structural-stratum, matched-variant, and cosmetic-variant accounting;
+  natural typed wording; prospectively parallel option forms; finite support-aware category-bound
+  lexical review; and retained full-frame plus deterministic zoom review renders.
+- Added exact six-family wording, causal-identity invariance, all-L1/prospective-source mutation,
+  option-confound, lexical-category, and decoded review-zoom regressions. Tokenizer-specific option
+  length remains an explicit pending M2.4 obligation.
+- Local locked sync, Ruff lint/format, strict mypy, all 318 tests, offline smoke, fresh Core
+  generation/validation/replay, the corrected M2.2 engineering lifecycle, and benchmark Git audit
+  passed. The M2.1 engineering build/validation passed; its approval correctly refused the dirty
+  pre-commit tree and is scheduled for clean-head repetition.
+- Status: the bounded correction commit, exact-head protected CI, clean-head M2.1 completion, and
+  private artifact regeneration remain pending in this correction task. No merge, tag, release,
+  production freeze, M2.3, model/GPU, treatment, or EPS work occurred.
+
+### 2026-08-27 — M2.2 scientific-convergence correction
+
+- Continued pull request `#7` from exact reviewed head
+  `4532e39f9afb75865ee4183c5ceef71770192c5c` after branch, upstream, pull-request, canonical-base,
+  clean-tree, private-identity, and protected CPU-check preflight.
+- Implemented `US-PR0007-SR-0001`, `US-PR0007-SR-0003`, and `US-PR0007-SR-0005` as
+  `IMPLEMENTED_PENDING_VERIFICATION`. Configuration-specific mechanism signatures are retained,
+  while a new coarse typed mechanism-kind identity binds the complete L1/prospective prohibited
+  sets and the genuine L1-source-to-L2-target mapping.
+- Made no-change questions reconstruct from `NOOP`/`WAIT` action status, split lexical findings into
+  selective hash-bound scientific subcategories with sentence-local n-grams, and configured an
+  exact eight groups per authorised task family.
+- Added coordinated mechanism-kind, fitting/undersized prohibited-kind, unchanged-control,
+  nuisance/renderer, sentence-boundary, subcategory-membership, and selective-disposition
+  regressions. The corrected private authoring migration was first validated entirely in memory.
+- Status: local verification, the bounded correction commit, exact-head protected CI, and private
+  regeneration remain part of this correction task. No merge, tag, release, freeze, M2.3,
+  model/GPU, treatment, scientific result, or EPS work occurred.
+
+### 2026-08-27 — M2.2 engineering-review correction
+
+- Continued pull request `#7` from exact reviewed head
+  `fd6b52b40ff0b79a79fe884e5254dcb9a5b2b60f` after clean branch/upstream, pull-request,
+  canonical-base, and protected CPU-check preflight.
+- Corrected `US-PR0007-ER-0001` so review-publication cleanup preserves the primary failure,
+  reports rename/move/removal/invalidation diagnostics, retains the strongest valid governed
+  failure record, and prevents a reported-failed destination from remaining validatable whenever
+  the filesystem permits invalidation.
+- Corrected `US-PR0007-ER-0002` so non-engineering literal source and review validation binds the
+  resolved paths to the tracked canonical roots while retaining explicit engineering-fixture and
+  internal unpublished-staging support.
+- Added compounded fault-injection, failure-record preservation, copied/moved/aliased-root,
+  read-only rejection, canonical acceptance, and engineering-override regression coverage.
+- Status: complete local verification, the bounded correction commit, exact-head protected CI, and
+  clean-head private evidence regeneration remain pending in this correction task. No merge, tag,
+  release, freeze, M2.3, model/GPU, treatment, scientific result, or EPS work occurred.
+
+### 2026-08-27 — M2.2 canonical-root alias correction
+
+- Continued pull request `#7` from exact reviewed head
+  `211d6abef34f7fd2a4927a7418f3bf4f1f25221d` after clean branch/upstream, pull-request,
+  canonical-base, and protected CPU-check preflight.
+- Corrected `US-PR0007-ER-0002` so non-engineering outcome source and review roots require exact
+  normalized absolute lexical identity before resolution, and reject symbolic-link, junction, or
+  other reparse-point components through `lstat` metadata before resolved containment checks.
+- Retained canonical relative/absolute spellings and authorised engineering overrides, while adding
+  public-validator and CLI regressions for direct canonical aliases, moved copies, and governed
+  intermediate aliases on POSIX and Windows.
+- Status: full local verification, the bounded correction commit, exact-head protected CI, private
+  evidence regeneration, and metadata-only pull-request correction remain pending. No scientific
+  content, merge, tag, release, freeze, M2.3, model/GPU, treatment, scientific result, cue
+  disposition, closeout, or EPS work occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

@@ -1,0 +1,87 @@
+schema_version: "2"
+candidate_version: m2-2-literal-candidate-v1
+purpose: outcome
+environment_version: schemaworld-core-v1
+generator_version: literal-generator-v3
+partition_plan_version: literal-partition-plan-v3
+authoring_manifest: benchmarks/source/m2-2-literal-candidate-v1/literal_authoring.json
+source_root: benchmarks/source/m2-2-literal-candidate-v1
+candidate_root: benchmarks/private/m2-2-literal-candidate-v1
+review_root: reports/private/m2-2-literal-candidate-v1
+generation_seeds:
+  - 22001
+  - 22002
+  - 22003
+  - 22004
+  - 22005
+  - 22006
+  - 22007
+  - 22008
+  - 22009
+  - 22010
+  - 22011
+  - 22012
+  - 22013
+  - 22014
+  - 22015
+  - 22016
+  - 22017
+  - 22018
+  - 22019
+  - 22020
+  - 22021
+  - 22022
+  - 22023
+  - 22024
+  - 22025
+  - 22026
+  - 22027
+  - 22028
+  - 22029
+  - 22030
+  - 22031
+  - 22032
+  - 22033
+  - 22034
+  - 22035
+  - 22036
+  - 22037
+  - 22038
+  - 22039
+  - 22040
+  - 22041
+  - 22042
+  - 22043
+  - 22044
+  - 22045
+  - 22046
+  - 22047
+  - 22048
+coverage:
+  minimum_question_groups: 48
+  minimum_causal_scenarios: 28
+  minimum_independent_structural_strata: 28
+  minimum_matched_variants: 14
+  records_per_group: 2
+  required_schemas: [CONTAINMENT, SUPPORT]
+  required_levels: [L1, L2]
+  required_task_families:
+    - direct-literal-outcome
+    - literal-intervention-consequence
+    - matched-counterfactual-reasoning
+    - novel-literal-template
+    - novel-literal-configuration
+    - literal-physical-mechanism-analogy
+  required_groups_per_task_family: 8
+  minimum_groups_per_schema: 24
+  minimum_groups_per_schema_level: 12
+execution:
+  device: cpu
+  offline: true
+  network_access: false
+  model_access: false
+  gpu_access: false
+  requires_secret: false
+engineering_only: false
+scientific_eligible: true
+promotable: false
