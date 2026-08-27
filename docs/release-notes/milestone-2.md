@@ -1,13 +1,13 @@
 # Milestone 2 Release — Benchmark, qualification, and stack freeze
 
-> Draft work-in-progress record. M2.1 is completed and merged, but Milestone 2 is not complete,
-> `v1_core` is not frozen, and no tag or release is authorised by the M2.1 closeout.
+> Draft work-in-progress record. M2.1 and M2.2 are completed and merged, but Milestone 2 is not
+> complete, `v1_core` is not frozen, and no tag or release is authorised by the M2.2 closeout.
 
 ## Identity
 
 - Tag: `<blocked until all M2.1-M2.6 work and canonical closeout>`
 - Commit: `<pending final Milestone 2 canonical merge>`
-- Implementation pull requests: `M2.1: #5 merged; M2.2-M2.6 pending`
+- Implementation pull requests: `M2.1: #5 merged; M2.2: #7 merged; M2.3-M2.6 pending`
 - Final milestone merge: `<pending>`
 - Release date: `<pending>`
 - Release URL: `<pending>`
@@ -32,19 +32,33 @@
   fail-closed post-rename handling as FROZEN publication. It contains no real benchmark item.
   The engineering fixture is regression evidence for the lifecycle implementation only and is not
   scientific benchmark evidence. No empirical LLM result is claimed.
-- **M2.2 — literal/counterfactual families:** implementation in progress on the dedicated M2.2
-  branch. The branch adds deterministic private typed authoring, independent SchemaWorld replay,
-  strict L1/L2 partitions, exact reverse variants, split/cue audits, M2.1 composite binding, private
-  review manifests/renders, CLI, CPU/offline engineering fixtures, tests, and CI. The real outcome
-  candidate is generated only after the final tracked head is clean, pushed, and CI-green. Owner
-  review, merge, closeout, human validation, rights, ethics, M2.3-M2.5, and `v1_core` remain pending.
+- **M2.2 — literal/counterfactual families:** completed and merged through pull request `#7` at
+  approved head `aa8a828f323f5c3f31a8a6048b5e1857ec314569`; exact-head review converged as
+  `ENGINEERING_PASS` and `SCIENTIFIC_PASS`; canonical implementation merge
+  `2fb34969c74df359587ac510f0c108c9b4fdccdd`; final implementation-main workflow run
+  `33077391425`, job `cpu` (`98535071632`), passed. The owner accepted the exact category
+  memberships for necessary causal-condition vocabulary
+  (`c588337741cdf1d3afde972b1fe8c9cf0362b536f24b98ab8d19cfe7f99e9f4c`), physical-mechanism
+  correlation (`065ec3948b1fa996bdacc692a7c1081defa1bf8a97dfd0c3f1fb6104ae4d2a51`), and
+  duplicate/matched wording (`074718208b44444beb500953da5df718477355646ca707cdb0a99894e8860152`).
+  Approved aggregate identities include literal source bundle
+  `030d0dffdc574334844126f97ac65b4b94a086c7ea875e12afc139d06fb6cb59`, M2.1 candidate root
+  `935e8c81d2367c55bf8230d7d9aa3e4e0c4ff4f69865c169439af1275133c4fe`, lexical audit
+  `23d4e5e11238b8041891f82cf84b24f0fffa8225280b544ec53ee73876b7631e`, M2.2 composite root
+  `3011c24f0592ecf627e8ada93350d7bb6056e16bbcbf65e9d538d4cbf06afc14`, review-content bundle
+  `3d9e10ad32ac0d83d4254cc480eef24396e60431226c5822e944d8f37c4535d4`, and review-manifest
+  logical root `cb5b8a445ec2616d0cb11c956637116a3b8271553543a18bf3c1f1439df8bc0e`.
+  This acceptance makes no lexical-neutrality or empirical claim. Duplicate/matched wording remains
+  non-independent and creates an M2.4 clustering/weighting obligation; tokenizer-specific and
+  broader model-facing cue checks remain pending. Human validation, rights, ethics, and future
+  treatment overlap remain unresolved.
 - **M2.3 — abstract/metaphorical families:** pending.
 - **M2.4 — scoring, option order, leakage, retention:** pending.
 - **M2.5 — RTX 5070 qualification/model selection and `selection_probe_v1`:** pending.
-- **M2.6 — approved production `v1_core` freeze:** pending and blocked by M2.2-M2.5 plus owner
+- **M2.6 — approved production `v1_core` freeze:** pending and blocked by M2.3-M2.5 plus owner
   decisions/approvals.
 
-## Explicit M2.1 exclusions
+## Explicit M2.1-M2.2 exclusions
 
 - No real Phase I question, final target domain, external diagnostic, or Wang–Liao-derived content.
 - No selection probe, scoring/evaluator, leakage comparison against treatment data, retention
@@ -52,6 +66,8 @@
 - No human recruitment or fabricated validation, rights, ethics, licence, seed, threshold, stack,
   public/private-release, or durable-archive decision.
 - No `v1_core` production freeze, benchmark/scientific tag, release, or Milestone 2 completion claim.
+- No empirical result or Phase I gate claim; owner cue acceptance does not establish lexical
+  neutrality or independent evidence from cosmetic variants.
 
 ## Verification
 
@@ -110,6 +126,8 @@ licensing, model stack, Phase I seeds/thresholds, and durable external archive r
 - Milestone status: `IN PROGRESS`.
 - M2.1 status: `COMPLETED AND MERGED` as an engineering work package; this does not complete
   Milestone 2.
+- M2.2 status: `COMPLETED AND MERGED` as a literal-candidate engineering/review work package; this
+  does not freeze or approve `v1_core` and does not establish a scientific result.
 - `v1_core` remains unfrozen. Every Milestone 2 tag, GitHub Release, final benchmark,
   model-selection, and advancement field remains pending.
-- Next authorised work after M2.1 closeout: M2.2, which was not begun by this closeout.
+- Next authorised work after M2.2 closeout: M2.3, which was not begun by this closeout.

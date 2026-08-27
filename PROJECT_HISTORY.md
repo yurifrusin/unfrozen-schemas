@@ -329,6 +329,56 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
   content, merge, tag, release, freeze, M2.3, model/GPU, treatment, scientific result, cue
   disposition, closeout, or EPS work occurred.
 
+### 2026-08-27 — Milestone 2 M2.2 canonical implementation merge and work-package closeout
+
+- Owner approval identified implementation pull request `#7` and exact head
+  `aa8a828f323f5c3f31a8a6048b5e1857ec314569` against canonical base
+  `ee6fff36317665ce729c870c858f273a6b348894`.
+- Exact-head review converged as `ENGINEERING_PASS` and `SCIENTIFIC_PASS` at the approved SHA. Pull
+  request `https://github.com/yurifrusin/unfrozen-schemas/pull/7` was revalidated as open,
+  non-draft, mergeable into `main`, with zero review threads and protected `cpu` workflow run
+  `33045178510`, job `98427407684`, passing on that exact head.
+- The owner accepted the exact cue-category memberships
+  `necessary-causal-condition-vocabulary` at
+  `c588337741cdf1d3afde972b1fe8c9cf0362b536f24b98ab8d19cfe7f99e9f4c`,
+  `physical-mechanism-correlation` at
+  `065ec3948b1fa996bdacc692a7c1081defa1bf8a97dfd0c3f1fb6104ae4d2a51`, and
+  `duplicate-or-matched-wording` at
+  `074718208b44444beb500953da5df718477355646ca707cdb0a99894e8860152`. No consequential
+  finding or category membership was rejected.
+- The implementation was merged normally, without squash, rebase, rewrite, or administrator
+  bypass, at `2026-08-27T13:32:51Z`. The canonical implementation merge commit is
+  `2fb34969c74df359587ac510f0c108c9b4fdccdd`.
+- Push-triggered canonical-main workflow run `33077391425` passed job `cpu` (`98535071632`) on that
+  implementation merge commit. Local `main` was fast-forwarded and verified clean and equal to
+  `origin/main`; the approved head is an ancestor of canonical `main`.
+- The approved logical/scientific identities are authoring snapshot
+  `94a0c60be95cef05efe4bb62c64f60cd044a99d858043a827bb999b91f9cd409`, literal source bundle
+  `030d0dffdc574334844126f97ac65b4b94a086c7ea875e12afc139d06fb6cb59`, M2.1 candidate root
+  `935e8c81d2367c55bf8230d7d9aa3e4e0c4ff4f69865c169439af1275133c4fe`, M2.1 source snapshot
+  `461a304e7525ed629aaf428c1acafeac8116835fe0fc8584e5627f1d80fcf8d9`, private-answer bundle
+  `13988d04ffa9bce8bc6c8d9b48ddf96da0fe14f9c42a5a19c516a30327f684f4`, public-metadata bundle
+  `bd6cf587e729fdc1cd68b415e8da777a33b888e63eedc8b2ee16436f2c1c60eb`, quarantine scope
+  `51c6d80aafd1873880b1e1417a368433c6b3655dd9c1b48b38f24e74e5585c4f`, partition plan
+  `9b5f699ba146c28d0a75fc3ca4243292aa8920d369803b71c177537ce45114a5`, template registry
+  `21701a8f3839bb1e599d2b8a13842b62b218a93a1ce4736c9cc0ee0871fd4b53`, item-binding bundle
+  `d9392e25ad4197cae9a50a397870ef7e486de952720c46d189d43cb090f4cd9c`, witness bundle
+  `8664b84eb78cb31c2b5828b49b3dee88fda9163e9bc24afe02d1636f2f56ce80`, lexical audit
+  `23d4e5e11238b8041891f82cf84b24f0fffa8225280b544ec53ee73876b7631e`, split audit
+  `a95bf67a75dc15a77895894ae1f849b88b128eca9a67d66b4aef0569da9d2838`, source validation
+  `02320201bcdbdbf98c00f465b6b69047589107e811a6b8580758b3c1a1c70900`, candidate validation
+  `6d4985bc05d054c68f321b64a8af9d7810db0a03ac16a2ad2a5dad720a226d73`, M2.2 composite root
+  `3011c24f0592ecf627e8ada93350d7bb6056e16bbcbf65e9d538d4cbf06afc14`, review-content bundle
+  `3d9e10ad32ac0d83d4254cc480eef24396e60431226c5822e944d8f37c4535d4`, and review-manifest
+  logical root `cb5b8a445ec2616d0cb11c956637116a3b8271553543a18bf3c1f1439df8bc0e`.
+- The mechanically constrained documentation closeout branch is
+  `codex/milestone-2-m2-2-closeout`. M2.2 is completed as an engineering/review work package when
+  this linked record reaches canonical `main`; it is not a benchmark freeze or empirical result.
+- Milestone 2 remains in progress, `v1_core` remains unfrozen, and no Milestone 2,
+  benchmark-freeze, or scientific-checkpoint tag or GitHub Release was created.
+- Advancement decision: M2.3 is the next authorised work package, but it was not begun by this
+  closeout.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>
