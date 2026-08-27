@@ -295,6 +295,24 @@ This file records factual project chronology. It does not override `CODEX_SPEC.m
   regeneration remain part of this correction task. No merge, tag, release, freeze, M2.3,
   model/GPU, treatment, scientific result, or EPS work occurred.
 
+### 2026-08-27 — M2.2 engineering-review correction
+
+- Continued pull request `#7` from exact reviewed head
+  `fd6b52b40ff0b79a79fe884e5254dcb9a5b2b60f` after clean branch/upstream, pull-request,
+  canonical-base, and protected CPU-check preflight.
+- Corrected `US-PR0007-ER-0001` so review-publication cleanup preserves the primary failure,
+  reports rename/move/removal/invalidation diagnostics, retains the strongest valid governed
+  failure record, and prevents a reported-failed destination from remaining validatable whenever
+  the filesystem permits invalidation.
+- Corrected `US-PR0007-ER-0002` so non-engineering literal source and review validation binds the
+  resolved paths to the tracked canonical roots while retaining explicit engineering-fixture and
+  internal unpublished-staging support.
+- Added compounded fault-injection, failure-record preservation, copied/moved/aliased-root,
+  read-only rejection, canonical acceptance, and engineering-override regression coverage.
+- Status: complete local verification, the bounded correction commit, exact-head protected CI, and
+  clean-head private evidence regeneration remain pending in this correction task. No merge, tag,
+  release, freeze, M2.3, model/GPU, treatment, scientific result, or EPS work occurred.
+
 ## Entry template
 
 ### YYYY-MM-DD — <event>

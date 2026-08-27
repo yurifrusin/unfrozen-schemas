@@ -1014,9 +1014,13 @@ def generate_literal_source(
             }
         )
         write_canonical_json(literal_root / SOURCE_BUNDLE_FILE, source_bundle)
-        from unfrozen_schemas.evaluation.literal_validation import validate_literal_source
+        from unfrozen_schemas.evaluation.literal_validation import (
+            _validate_loaded_literal_source_content,
+            load_literal_source,
+            validate_literal_source,
+        )
 
-        validate_literal_source(staging)
+        _validate_loaded_literal_source_content(load_literal_source(staging))
         backup = _publish_source(staging, root, operation_id)
         published = True
         _after_literal_source_publication(root)

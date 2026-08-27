@@ -10,7 +10,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from unfrozen_schemas.config import sha256_file
 from unfrozen_schemas.envs.schema_world.dynamics import transition
@@ -1224,6 +1224,37 @@ def load_literal_source(source_root: Path) -> LoadedLiteralSource:
     )
 
 
+def validate_literal_root_location(
+    loaded: LoadedLiteralSource,
+    *,
+    observed_root: Path,
+    root_kind: Literal["source", "review"],
+) -> None:
+    """Require outcome artifacts to occupy their tracked canonical root."""
+
+    if loaded.source_manifest.engineering_only:
+        return
+    from unfrozen_schemas.config import find_repository_root
+
+    repository = find_repository_root(Path.cwd()).resolve()
+    key = f"{root_kind}_root"
+    configured_value = loaded.source_bundle.resolved_configuration.get(key)
+    if not isinstance(configured_value, str) or not configured_value:
+        raise ValueError(f"Outcome literal configuration is missing {key}")
+    configured_path = Path(configured_value)
+    if configured_path.is_absolute():
+        raise ValueError(f"Outcome literal configured {key} must be repository-relative")
+    expected = (repository / configured_path).resolve()
+    if not expected.is_relative_to(repository):
+        raise ValueError(f"Outcome literal configured {key} escapes the repository")
+    observed = observed_root.resolve()
+    if observed != expected:
+        raise ValueError(
+            f"Outcome literal {key} is outside its configured canonical location: "
+            f"expected {expected}; observed {observed}"
+        )
+
+
 def _verify_template_registry(
     registry: LiteralTemplateRegistryManifest, templates: Sequence[LiteralTemplate]
 ) -> None:
@@ -1234,7 +1265,7 @@ def _verify_template_registry(
         raise ValueError("Literal template registry hash does not reconstruct")
 
 
-def validate_loaded_literal_source(
+def _validate_loaded_literal_source_content(
     loaded: LoadedLiteralSource,
 ) -> LiteralValidationReport:
     """Reconstruct the complete source from its retained authoring snapshot."""
@@ -1619,6 +1650,20 @@ def validate_loaded_literal_source(
 
     _coverage(configured, bindings)
     return expected
+
+
+def validate_loaded_literal_source(
+    loaded: LoadedLiteralSource,
+) -> LiteralValidationReport:
+    """Validate source content and the canonical outcome-source location."""
+
+    report = _validate_loaded_literal_source_content(loaded)
+    validate_literal_root_location(
+        loaded,
+        observed_root=loaded.root,
+        root_kind="source",
+    )
+    return report
 
 
 def validate_literal_source(source_root: Path) -> LoadedLiteralSource:

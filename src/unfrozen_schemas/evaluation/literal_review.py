@@ -59,10 +59,12 @@ from unfrozen_schemas.evaluation.literal_validation import (
     COMPOSITE_CANDIDATE_FILE,
     LITERAL_DIRECTORY,
     LoadedLiteralSource,
+    _validate_loaded_literal_source_content,
     canonical_record_sha256,
     load_literal_source,
     pending_owner_review,
     review_content_records,
+    validate_literal_root_location,
     validate_loaded_literal_source,
 )
 from unfrozen_schemas.provenance import (
@@ -79,8 +81,16 @@ REVIEW_OPERATION_FILE = "review_operation_record.json"
 CUE_DISPOSITION_FILE = "cue_disposition_pending.json"
 
 
-def _candidate_report(loaded: LoadedLiteralSource) -> LiteralValidationReport:
-    source_report = validate_loaded_literal_source(loaded)
+def _candidate_report(
+    loaded: LoadedLiteralSource,
+    *,
+    enforce_source_location: bool = True,
+) -> LiteralValidationReport:
+    source_report = (
+        validate_loaded_literal_source(loaded)
+        if enforce_source_location
+        else _validate_loaded_literal_source_content(loaded)
+    )
     provisional = source_report.model_copy(
         update={
             "m2_1_lifecycle_validation": "PASS",
@@ -218,11 +228,12 @@ def _verify_materialization_operation(
     return operation
 
 
-def validate_literal_benchmark(
+def _validate_literal_benchmark(
     *,
     source_root: Path,
     candidate_manifest_path: Path,
     repository_root: Path | None = None,
+    enforce_source_location: bool,
 ) -> LiteralCandidateManifest:
     """Read-only validation of an already materialized M2.2 composite candidate."""
 
@@ -230,7 +241,10 @@ def validate_literal_benchmark(
         find_repository_root(Path.cwd()) if repository_root is None else repository_root.resolve()
     )
     loaded = load_literal_source(source_root)
-    validate_loaded_literal_source(loaded)
+    report = _candidate_report(
+        loaded,
+        enforce_source_location=enforce_source_location,
+    )
     validated = validate_benchmark_manifest(
         candidate_manifest_path,
         repository_root=repository,
@@ -248,7 +262,6 @@ def validate_literal_benchmark(
             raise ValueError("Outcome literal candidate requires clean Git state")
         if candidate.git.commit != current_git.commit:
             raise ValueError("Outcome literal candidate does not match the current branch head")
-    report = _candidate_report(loaded)
     composite = _composite_candidate(
         loaded=loaded,
         candidate=candidate,
@@ -271,6 +284,22 @@ def validate_literal_benchmark(
         current_git=current_git,
     )
     return composite
+
+
+def validate_literal_benchmark(
+    *,
+    source_root: Path,
+    candidate_manifest_path: Path,
+    repository_root: Path | None = None,
+) -> LiteralCandidateManifest:
+    """Read-only validation at the configured outcome-source location."""
+
+    return _validate_literal_benchmark(
+        source_root=source_root,
+        candidate_manifest_path=candidate_manifest_path,
+        repository_root=repository_root,
+        enforce_source_location=True,
+    )
 
 
 def _after_literal_candidate_publication(_output: Path) -> None:
@@ -320,8 +349,8 @@ def materialize_literal_candidate(
     try:
         shutil.copytree(source, staging)
         staged = load_literal_source(staging)
-        validate_loaded_literal_source(staged)
-        report = _candidate_report(staged)
+        _validate_loaded_literal_source_content(staged)
+        report = _candidate_report(staged, enforce_source_location=False)
         composite = _composite_candidate(
             loaded=staged,
             candidate=candidate,
@@ -377,10 +406,11 @@ def materialize_literal_candidate(
         )
         operation = provisional.model_copy(update={"operation_sha256": operation_hash(provisional)})
         write_canonical_json(operation_path, operation)
-        validate_literal_benchmark(
+        _validate_literal_benchmark(
             source_root=staging,
             candidate_manifest_path=candidate_manifest_path,
             repository_root=repository,
+            enforce_source_location=False,
         )
         backup = _publish_source(staging, source, operation_id)
         published = True
@@ -836,11 +866,128 @@ def _after_literal_review_publication(_output: Path) -> None:
     """Injection seam for the first instruction after review publication."""
 
 
+def _cleanup_failed_review_publication(output: Path, operation_id: str) -> tuple[str, ...]:
+    """Best-effort quarantine cascade that never replaces the primary failure."""
+
+    notes: list[str] = []
+    if not output.exists():
+        return ()
+    quarantine = output.parent / f".{output.name}.invalid-review-{operation_id}"
+    if quarantine.exists():
+        notes.append(f"review quarantine destination already exists: {quarantine.name}")
+    else:
+        try:
+            os.replace(output, quarantine)
+            return (f"invalid review quarantined by replace at {quarantine.name}",)
+        except Exception as cleanup_exc:
+            notes.append(
+                f"review quarantine replace failed: {type(cleanup_exc).__name__}: {cleanup_exc}"
+            )
+        try:
+            shutil.move(str(output), str(quarantine))
+            notes.append(f"invalid review quarantined by move at {quarantine.name}")
+            return tuple(notes)
+        except Exception as cleanup_exc:
+            notes.append(
+                f"review quarantine move failed: {type(cleanup_exc).__name__}: {cleanup_exc}"
+            )
+    try:
+        shutil.rmtree(output)
+        notes.append("invalid review removed after quarantine failures")
+        return tuple(notes)
+    except Exception as cleanup_exc:
+        notes.append(f"review removal failed: {type(cleanup_exc).__name__}: {cleanup_exc}")
+    if not output.exists():
+        notes.append("invalid review is absent after partial removal")
+        return tuple(notes)
+    manifest = output / REVIEW_MANIFEST_FILE
+    if not manifest.exists():
+        notes.append("invalid review manifest is absent after partial removal")
+        return tuple(notes)
+    try:
+        manifest.unlink()
+        notes.append("invalid review manifest removed to prevent validation")
+        return tuple(notes)
+    except Exception as cleanup_exc:
+        notes.append(
+            "review manifest unlink invalidation failed: "
+            f"{type(cleanup_exc).__name__}: {cleanup_exc}"
+        )
+    invalidated = output / f".{REVIEW_MANIFEST_FILE}.invalidated-{operation_id}"
+    try:
+        os.replace(manifest, invalidated)
+        notes.append("invalid review manifest renamed to prevent validation")
+        return tuple(notes)
+    except Exception as cleanup_exc:
+        notes.append(
+            "review manifest rename invalidation failed: "
+            f"{type(cleanup_exc).__name__}: {cleanup_exc}"
+        )
+    try:
+        manifest.write_bytes(b'{"invalidated":true}\n')
+        notes.append("invalid review manifest overwritten to prevent validation")
+    except Exception as cleanup_exc:
+        notes.append(
+            "review manifest overwrite invalidation failed: "
+            f"{type(cleanup_exc).__name__}: {cleanup_exc}"
+        )
+    return tuple(notes)
+
+
+def _valid_failure_record(path: Path, operation_id: str) -> bool:
+    try:
+        record = read_canonical_model(path, LiteralOperationRecord)
+    except Exception:
+        return False
+    return (
+        record.operation_id == operation_id
+        and record.status == "FAILED"
+        and operation_hash(record) == record.operation_sha256
+    )
+
+
+def _recover_review_failure_record(
+    output: Path,
+    operation_id: str,
+) -> tuple[Path | None, tuple[str, ...]]:
+    """Retain the strongest valid failure record after publication itself fails."""
+
+    notes: list[str] = []
+    final = output.parent / f".{output.name}.failure-{operation_id}.json"
+    if final.is_file() and _valid_failure_record(final, operation_id):
+        return final, ()
+    staged = sorted(output.parent.glob(f"..{output.name}.failure-{operation_id}.json.staging-*"))
+    valid_staged = next(
+        (path for path in staged if path.is_file() and _valid_failure_record(path, operation_id)),
+        None,
+    )
+    if valid_staged is None:
+        return None, ()
+    if not final.exists():
+        try:
+            shutil.move(str(valid_staged), str(final))
+            if _valid_failure_record(final, operation_id):
+                notes.append("governed failure record preserved by move fallback")
+                return final, tuple(notes)
+        except Exception as preserve_exc:
+            notes.append(
+                "failure-record move fallback failed: "
+                f"{type(preserve_exc).__name__}: {preserve_exc}"
+            )
+    notes.append(f"governed staged failure record retained at {valid_staged.name}")
+    return valid_staged, tuple(notes)
+
+
 def build_literal_review(*, source_root: Path, output_root: Path) -> LiteralOperationResult:
     """Atomically build a private review bundle with full and zoomed renders."""
 
     loaded, composite, report, materialization = _load_materialized_source(source_root)
     output = output_root.resolve()
+    validate_literal_root_location(
+        loaded,
+        observed_root=output,
+        root_kind="review",
+    )
     if output.exists():
         raise FileExistsError(f"Literal review destination already exists: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -1022,7 +1169,13 @@ def build_literal_review(*, source_root: Path, output_root: Path) -> LiteralOper
             update={"review_manifest_sha256": review_manifest_hash(manifest_provisional)}
         )
         write_canonical_json(staging / REVIEW_MANIFEST_FILE, manifest)
-        validate_literal_review(review_root=staging, source_root=loaded.root)
+        _validate_literal_review_content(
+            root=staging,
+            loaded=loaded,
+            composite=composite,
+            report=report,
+            materialization=materialization,
+        )
         os.replace(staging, output)
         published = True
         _after_literal_review_publication(output)
@@ -1049,14 +1202,13 @@ def build_literal_review(*, source_root: Path, output_root: Path) -> LiteralOper
             tracemalloc.stop()
         notes: list[str] = []
         if published and output.exists():
-            quarantine = output.parent / f".{output.name}.invalid-review-{operation_id}"
             try:
-                os.replace(output, quarantine)
-                notes.append(f"invalid review quarantined at {quarantine.name}")
+                notes.extend(_cleanup_failed_review_publication(output, operation_id))
             except Exception as cleanup_exc:
-                if output.exists():
-                    shutil.rmtree(output)
-                notes.append(f"review quarantine failed: {cleanup_exc}")
+                notes.append(
+                    "review publication cleanup cascade failed unexpectedly: "
+                    f"{type(cleanup_exc).__name__}: {cleanup_exc}"
+                )
         try:
             _safe_remove_tree(staging, output.parent, marker=".staging-")
         except Exception as cleanup_exc:
@@ -1099,18 +1251,28 @@ def build_literal_review(*, source_root: Path, output_root: Path) -> LiteralOper
                 failure_reason=reason,
             )
         except Exception as record_exc:
-            reason += f"; failure-record write failed: {record_exc}"
+            record_notes = [
+                f"failure-record write failed: {type(record_exc).__name__}: {record_exc}"
+            ]
+            failure_path, recovery_notes = _recover_review_failure_record(output, operation_id)
+            record_notes.extend(recovery_notes)
+            reason += "; " + "; ".join(record_notes)
         raise LiteralOperationError(
             reason,
             failure_record_path=None if failure_path is None else str(failure_path),
         ) from exc
 
 
-def validate_literal_review(*, review_root: Path, source_root: Path) -> LiteralReviewManifest:
-    """Read back every review artifact, decoded image, and operation binding."""
+def _validate_literal_review_content(
+    *,
+    root: Path,
+    loaded: LoadedLiteralSource,
+    composite: LiteralCandidateManifest,
+    report: LiteralValidationReport,
+    materialization: LiteralOperationRecord,
+) -> LiteralReviewManifest:
+    """Reconstruct review content at a caller-authorised publication location."""
 
-    root = review_root.resolve()
-    loaded, composite, report, materialization = _load_materialized_source(source_root)
     manifest = read_canonical_model(root / REVIEW_MANIFEST_FILE, LiteralReviewManifest)
     expected_manifest_paths = {
         path.relative_to(root).as_posix()
@@ -1240,6 +1402,25 @@ def validate_literal_review(*, review_root: Path, source_root: Path) -> LiteralR
     if operation.resource_budget != expected_budget:
         raise ValueError("Literal review ResourceBudget does not reconstruct")
     return manifest
+
+
+def validate_literal_review(*, review_root: Path, source_root: Path) -> LiteralReviewManifest:
+    """Read back a review bundle only at configured non-engineering roots."""
+
+    root = review_root.resolve()
+    loaded, composite, report, materialization = _load_materialized_source(source_root)
+    validate_literal_root_location(
+        loaded,
+        observed_root=root,
+        root_kind="review",
+    )
+    return _validate_literal_review_content(
+        root=root,
+        loaded=loaded,
+        composite=composite,
+        report=report,
+        materialization=materialization,
+    )
 
 
 def inspect_literal_item(

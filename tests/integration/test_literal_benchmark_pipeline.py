@@ -6,6 +6,8 @@ import os
 import shutil
 import socket
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -553,3 +555,219 @@ def test_quarantine_move_failure_removes_publication_and_preserves_primary(
     assert not output.exists()
     assert "publication cleanup failed" in str(raised.value)
     assert raised.value.failure_record_path is not None
+
+
+def test_review_cleanup_compounded_failures_preserve_primary_and_invalidate_output(
+    materialized_pipeline: tuple[Path, Path, Path, LiteralCandidateManifest],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unfrozen_schemas.evaluation import literal_review
+
+    source, _candidate, _manifest_path, _composite = materialized_pipeline
+    output = tmp_path / "compounded-review-cleanup"
+    real_replace = os.replace
+    real_move = shutil.move
+    real_rmtree = shutil.rmtree
+    real_unlink = Path.unlink
+
+    def selective_replace(source_path: Path | str, destination: Path | str) -> None:
+        if Path(source_path) == output:
+            raise OSError("injected review quarantine replace failure")
+        real_replace(source_path, destination)
+
+    def selective_move(source_path: Path | str, destination: Path | str) -> object:
+        if Path(source_path) == output:
+            raise OSError("injected review quarantine move failure")
+        return real_move(source_path, destination)
+
+    def selective_rmtree(path: Path | str) -> None:
+        if Path(path) == output:
+            raise OSError("injected review removal failure")
+        real_rmtree(path)
+
+    def selective_unlink(path: Path, missing_ok: bool = False) -> None:
+        if path == output / "review_manifest.json":
+            raise OSError("injected review manifest unlink failure")
+        real_unlink(path, missing_ok=missing_ok)
+
+    def primary(_output: Path) -> None:
+        raise RuntimeError("injected review primary remains primary")
+
+    with monkeypatch.context() as faults:
+        faults.setattr(os, "replace", selective_replace)
+        faults.setattr(shutil, "move", selective_move)
+        faults.setattr(shutil, "rmtree", selective_rmtree)
+        faults.setattr(Path, "unlink", selective_unlink)
+        faults.setattr(literal_review, "_after_literal_review_publication", primary)
+        with pytest.raises(LiteralOperationError) as raised:
+            build_literal_review(source_root=source, output_root=output)
+        message = str(raised.value)
+        assert message.startswith("RuntimeError: injected review primary remains primary")
+        assert isinstance(raised.value.__cause__, RuntimeError)
+        assert "review quarantine replace failed" in message
+        assert "review quarantine move failed" in message
+        assert "review removal failed" in message
+        assert "review manifest unlink invalidation failed" in message
+        assert "review manifest renamed to prevent validation" in message
+        assert output.is_dir()
+        with pytest.raises(FileNotFoundError, match=r"review_manifest\.json"):
+            validate_literal_review(review_root=output, source_root=source)
+        assert raised.value.failure_record_path is not None
+        failure_path = Path(raised.value.failure_record_path)
+        record = read_canonical_model(failure_path, LiteralOperationRecord)
+        assert record.status == "FAILED"
+        assert record.failure_reason is not None
+        assert record.failure_reason.startswith(
+            "RuntimeError: injected review primary remains primary"
+        )
+        assert operation_hash(record) == record.operation_sha256
+
+    assert os.replace is real_replace
+    assert shutil.move is real_move
+    assert shutil.rmtree is real_rmtree
+    assert Path.unlink is real_unlink
+    shutil.rmtree(output)
+    failure_path.unlink()
+    assert not list(tmp_path.glob(f".{output.name}*"))
+
+
+def test_review_failure_record_publication_failure_retains_valid_staged_record(
+    materialized_pipeline: tuple[Path, Path, Path, LiteralCandidateManifest],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unfrozen_schemas.evaluation import literal_review
+
+    source, _candidate, _manifest_path, _composite = materialized_pipeline
+    output = tmp_path / "review-failure-record-fallback"
+    real_replace = os.replace
+    real_move = shutil.move
+
+    def selective_replace(source_path: Path | str, destination: Path | str) -> None:
+        if ".failure-" in Path(destination).name:
+            raise OSError("injected failure-record replace failure")
+        real_replace(source_path, destination)
+
+    def selective_move(source_path: Path | str, destination: Path | str) -> object:
+        if ".failure-" in Path(source_path).name:
+            raise OSError("injected failure-record move failure")
+        return real_move(source_path, destination)
+
+    def primary(_output: Path) -> None:
+        raise RuntimeError("injected review failure before record fallback")
+
+    with monkeypatch.context() as faults:
+        faults.setattr(os, "replace", selective_replace)
+        faults.setattr(shutil, "move", selective_move)
+        faults.setattr(literal_review, "_after_literal_review_publication", primary)
+        with pytest.raises(LiteralOperationError) as raised:
+            build_literal_review(source_root=source, output_root=output)
+        message = str(raised.value)
+        assert message.startswith("RuntimeError: injected review failure before record fallback")
+        assert "failure-record write failed" in message
+        assert "failure-record move fallback failed" in message
+        assert "governed staged failure record retained" in message
+        assert not output.exists()
+        assert raised.value.failure_record_path is not None
+        failure_path = Path(raised.value.failure_record_path)
+        assert ".staging-" in failure_path.name
+        record = read_canonical_model(failure_path, LiteralOperationRecord)
+        assert record.status == "FAILED"
+        assert record.failure_reason is not None
+        assert record.failure_reason.startswith(
+            "RuntimeError: injected review failure before record fallback"
+        )
+        assert operation_hash(record) == record.operation_sha256
+
+    assert os.replace is real_replace
+    assert shutil.move is real_move
+    failure_path.unlink()
+    assert not list(tmp_path.glob(f"..{output.name}.failure-*.staging-*"))
+
+
+def test_outcome_validators_enforce_configured_roots_and_keep_engineering_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unfrozen_schemas import config as config_module
+    from unfrozen_schemas.evaluation import literal_review, literal_validation
+
+    repository = tmp_path / "root-contract-repository"
+    source = repository / "benchmarks" / "source" / "outcome-location-fixture-v1"
+    review = repository / "reports" / "private" / "outcome-location-fixture-v1"
+    source.mkdir(parents=True)
+    review.mkdir(parents=True)
+    (source / "artifact.bin").write_bytes(b"exact source copy")
+    (review / "artifact.bin").write_bytes(b"exact review copy")
+    engineering = {"enabled": False}
+
+    def fake_loaded(root: Path) -> Any:
+        return SimpleNamespace(
+            root=root.resolve(),
+            source_manifest=SimpleNamespace(engineering_only=engineering["enabled"]),
+            source_bundle=SimpleNamespace(
+                resolved_configuration={
+                    "source_root": "benchmarks/source/outcome-location-fixture-v1",
+                    "review_root": "reports/private/outcome-location-fixture-v1",
+                }
+            ),
+        )
+
+    monkeypatch.setattr(config_module, "find_repository_root", lambda _path: repository)
+    monkeypatch.setattr(literal_validation, "load_literal_source", fake_loaded)
+    monkeypatch.setattr(
+        literal_validation,
+        "_validate_loaded_literal_source_content",
+        lambda _loaded: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        literal_review,
+        "_load_materialized_source",
+        lambda source_root: (fake_loaded(source_root), None, None, None),
+    )
+    monkeypatch.setattr(
+        literal_review,
+        "_validate_literal_review_content",
+        lambda **_kwargs: SimpleNamespace(),
+    )
+    validate_literal_source(source)
+    validate_literal_review(review_root=review, source_root=source)
+
+    outside_source = tmp_path / "copied-outcome-source"
+    outside_review = tmp_path / "copied-outcome-review"
+    shutil.copytree(source, outside_source)
+    shutil.copytree(review, outside_review)
+    source_before = _file_snapshot(outside_source)
+    review_before = _file_snapshot(outside_review)
+    with pytest.raises(ValueError, match=r"source_root.*configured canonical"):
+        validate_literal_source(outside_source)
+    with pytest.raises(ValueError, match=r"review_root.*configured canonical"):
+        validate_literal_review(review_root=outside_review, source_root=source)
+    assert _file_snapshot(outside_source) == source_before
+    assert _file_snapshot(outside_review) == review_before
+
+    moved_source = tmp_path / "moved-outcome-source"
+    moved_review = tmp_path / "moved-outcome-review"
+    shutil.move(str(outside_source), str(moved_source))
+    shutil.move(str(outside_review), str(moved_review))
+    with pytest.raises(ValueError, match=r"source_root.*configured canonical"):
+        validate_literal_source(moved_source)
+    with pytest.raises(ValueError, match=r"review_root.*configured canonical"):
+        validate_literal_review(review_root=moved_review, source_root=source)
+
+    alias_candidate = tmp_path / "outcome-source-alias"
+    source_alias: Path | None
+    try:
+        alias_candidate.symlink_to(moved_source, target_is_directory=True)
+    except OSError:
+        source_alias = None
+    else:
+        source_alias = alias_candidate
+    if source_alias is not None:
+        with pytest.raises(ValueError, match=r"source_root.*configured canonical"):
+            validate_literal_source(source_alias)
+
+    engineering["enabled"] = True
+    validate_literal_source(moved_source)
+    validate_literal_review(review_root=moved_review, source_root=moved_source)
